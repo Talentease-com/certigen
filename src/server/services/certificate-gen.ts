@@ -1,10 +1,12 @@
 import sharp from "sharp";
-import QRCode from "qrcode";
+import { encode } from "uqr";
 import { nanoid } from "nanoid";
-import PDFDocument from "pdfkit";
+import { PDFDocument } from "pdf-lib";
 import fs from "node:fs";
 import path from "node:path";
-import opentype from "opentype.js";
+// @ts-expect-error — subpath import targets ESM build; types come from @types/opentype.js
+import opentype from "opentype.js/dist/opentype.module.js";
+import { saveCertificateFile } from "./storage";
 
 export interface PlaceholderConfig {
   key: string;
@@ -18,14 +20,14 @@ export interface PlaceholderConfig {
 }
 
 interface GenerateCertificateOptions {
-  templatePath: string;
+  templateBuffer: Buffer;
   templateWidth: number;
   templateHeight: number;
   placeholders: PlaceholderConfig[];
   values: Record<string, string>;
   certId: string;
   verifyUrl: string;
-  outputDir: string;
+  workshopCode: string;
 }
 
 function getFontPath(fontFamily: string): string | null {
@@ -70,7 +72,6 @@ function buildTextSvg(
 ): Buffer {
   const {
     x,
-    y,
     fontSize,
     fontFamily,
     color,
@@ -89,7 +90,6 @@ function buildTextSvg(
       dx = maxWidth ? x + maxWidth - textWidth : canvasWidth - textWidth;
     }
 
-    // Typical baseline is around ~1x to 1.5x font size down from the top inside a bounding box
     const yOffset = fontSize * 1.5;
     const pathObj = font.getPath(value, dx, yOffset, fontSize);
     const svgPathData = pathObj.toPathData(2);
@@ -131,27 +131,45 @@ function buildTextSvg(
   return Buffer.from(svg);
 }
 
+function generateQrSvg(
+  url: string,
+  size: number,
+  darkColor: string,
+  lightColor: string,
+): string {
+  const result = encode(url, { ecc: "H", border: 1 });
+  const cellSize = size / result.size;
+  let cells = "";
+  for (let r = 0; r < result.size; r++) {
+    for (let c = 0; c < result.size; c++) {
+      if (result.data[r][c]) {
+        cells += `<rect x="${c * cellSize}" y="${r * cellSize}" width="${cellSize}" height="${cellSize}" fill="${darkColor}"/>`;
+      }
+    }
+  }
+  return `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg" style="background:${lightColor}">${cells}</svg>`;
+}
+
 export async function generateCertificateImage(
   opts: GenerateCertificateOptions,
-): Promise<{ pngPath: string; pdfPath: string }> {
+): Promise<{ pngStorageKey: string; pdfStorageKey: string }> {
   const {
-    templatePath,
+    templateBuffer,
     templateWidth,
     templateHeight,
     placeholders,
     values,
     certId,
     verifyUrl,
-    outputDir,
+    workshopCode,
   } = opts;
 
-  // Generate QR code as PNG buffer
-  const qrBuffer = await QRCode.toBuffer(verifyUrl, {
-    width: 280,
-    margin: 1,
-    color: { dark: "#333333", light: "#ffffff" },
-    errorCorrectionLevel: "H",
-  });
+  // Generate QR code as PNG buffer via SVG → sharp
+  const qrSvg = generateQrSvg(verifyUrl, 280, "#333333", "#ffffff");
+  const qrBuffer = await sharp(Buffer.from(qrSvg))
+    .resize(280, 280)
+    .png()
+    .toBuffer();
 
   // Build composite layers
   const composites: sharp.OverlayOptions[] = [];
@@ -177,35 +195,35 @@ export async function generateCertificateImage(
   });
 
   // Composite everything onto the template
-  const pngBuffer = await sharp(templatePath)
+  const pngBuffer = await sharp(templateBuffer)
     .composite(composites)
     .png({ quality: 90 })
     .toBuffer();
 
-  // Ensure output directory exists
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  // Save PNG
-  const pngPath = path.join(outputDir, `${certId}.png`);
-  fs.writeFileSync(pngPath, pngBuffer);
+  // Save PNG to storage
+  const pngStorageKey = await saveCertificateFile(
+    workshopCode,
+    certId,
+    ".png",
+    pngBuffer,
+  );
 
   // Generate PDF with the image as a full page (A4 landscape)
-  const pdfPath = path.join(outputDir, `${certId}.pdf`);
-  await new Promise<void>((resolve, reject) => {
-    // A4 landscape: width=841.89pt, height=595.28pt
-    const doc = new PDFDocument({
-      size: [841.89, 595.28],
-      margin: 0,
-    });
-    const stream = fs.createWriteStream(pdfPath);
-    doc.pipe(stream);
-    doc.image(pngBuffer, 0, 0, { width: 841.89, height: 595.28 });
-    doc.end();
-    stream.on("finish", resolve);
-    stream.on("error", reject);
-  });
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([841.89, 595.28]);
+  const pngImage = await pdfDoc.embedPng(pngBuffer);
+  page.drawImage(pngImage, { x: 0, y: 0, width: 841.89, height: 595.28 });
+  const pdfBytes = await pdfDoc.save();
 
-  return { pngPath, pdfPath };
+  // Save PDF to storage
+  const pdfStorageKey = await saveCertificateFile(
+    workshopCode,
+    certId,
+    ".pdf",
+    pdfBytes,
+  );
+
+  return { pngStorageKey, pdfStorageKey };
 }
 
 export function generateCertId(): string {

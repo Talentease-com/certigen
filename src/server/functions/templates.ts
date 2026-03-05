@@ -5,7 +5,11 @@ import { templates } from "#/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireAdmin } from "../middleware/auth";
-import { saveTemplate, deleteFile } from "../services/storage";
+import {
+  saveTemplate,
+  deleteStorageFile,
+  readStorageFile,
+} from "../services/storage";
 
 const uploadTemplateInput = z.object({
   token: z.string(),
@@ -24,12 +28,12 @@ export const uploadTemplate = createServerFn({ method: "POST" })
 
     const id = nanoid(12);
     const buffer = Buffer.from(data.imageData, "base64");
-    const filePath = saveTemplate(id, buffer, data.imageExt);
+    const storageKey = await saveTemplate(id, buffer, data.imageExt);
 
     await db.insert(templates).values({
       id,
       name: data.name,
-      filePath,
+      filePath: storageKey,
       placeholders: data.placeholders,
       width: data.width,
       height: data.height,
@@ -104,7 +108,7 @@ export const deleteTemplate = createServerFn({ method: "POST" })
     });
 
     if (template) {
-      deleteFile(template.filePath);
+      await deleteStorageFile(template.filePath);
       await db.delete(templates).where(eq(templates.id, data.id));
     }
 
@@ -129,12 +133,9 @@ export const testPreviewTemplate = createServerFn({ method: "POST" })
     const { generateCertificateImage, generateCertId } = await import(
       "../services/certificate-gen"
     );
-    const fs = await import("node:fs");
-    const path = await import("node:path");
-    const os = await import("node:os");
 
-    let templatePath: string;
-    let cleanup = false;
+    let templateBuffer: Buffer;
+    const workshopCode = "__preview__";
 
     if (data.templateId) {
       // Use existing template
@@ -142,52 +143,41 @@ export const testPreviewTemplate = createServerFn({ method: "POST" })
         where: eq(templates.id, data.templateId),
       });
       if (!template) throw new Error("Template not found");
-      templatePath = template.filePath;
+      templateBuffer = await readStorageFile(template.filePath);
     } else if (data.imageData) {
       // Use uploaded image (not yet saved)
-      const tmpDir = os.tmpdir();
-      templatePath = path.join(tmpDir, `preview_${Date.now()}${data.imageExt || ".png"}`);
-      fs.writeFileSync(templatePath, Buffer.from(data.imageData, "base64"));
-      cleanup = true;
+      templateBuffer = Buffer.from(data.imageData, "base64");
     } else {
       throw new Error("Provide either templateId or imageData");
     }
 
     const placeholders = JSON.parse(data.placeholders);
     const certId = generateCertId();
-    const outputDir = path.join(os.tmpdir(), "certigen-previews");
+
+    const { pngStorageKey, pdfStorageKey } = await generateCertificateImage({
+      templateBuffer,
+      templateWidth: data.width,
+      templateHeight: data.height,
+      placeholders,
+      values: {
+        name: "Jane Doe",
+        workshop_title: "Sample Workshop Title",
+        date: new Date().toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }),
+      },
+      certId,
+      verifyUrl: "https://certify.talentease.com/verify/example",
+      workshopCode,
+    });
 
     try {
-      const { pngPath } = await generateCertificateImage({
-        templatePath,
-        templateWidth: data.width,
-        templateHeight: data.height,
-        placeholders,
-        values: {
-          name: "Jane Doe",
-          workshop_title: "Sample Workshop Title",
-          date: new Date().toLocaleDateString("en-US", {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-          }),
-        },
-        certId,
-        verifyUrl: "https://certify.talentease.com/verify/example",
-        outputDir,
-      });
-
-      const imgBuffer = fs.readFileSync(pngPath);
-      // Cleanup preview files
-      try {
-        fs.unlinkSync(pngPath);
-        fs.unlinkSync(pngPath.replace(".png", ".pdf"));
-      } catch {}
-
+      const imgBuffer = await readStorageFile(pngStorageKey);
       return { base64: imgBuffer.toString("base64") };
     } finally {
-      if (cleanup) {
-        try { fs.unlinkSync(templatePath); } catch {}
-      }
+      await deleteStorageFile(pngStorageKey).catch(() => {});
+      await deleteStorageFile(pdfStorageKey).catch(() => {});
     }
   });

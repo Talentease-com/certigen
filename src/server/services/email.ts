@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import fs from "node:fs";
+import { readStorageFile } from "./storage";
 
 let resend: Resend | null = null;
 function getResend() {
@@ -14,16 +14,16 @@ interface SendCertificateEmailOptions {
   participantName: string;
   workshopTitle: string;
   workshopDate: string;
-  pdfPath: string;
+  pdfStorageKey: string;
   verifyUrl: string;
 }
 
 export async function sendCertificateEmail(
   opts: SendCertificateEmailOptions,
 ): Promise<void> {
-  const { to, participantName, workshopTitle, workshopDate, pdfPath, verifyUrl } = opts;
+  const { to, participantName, workshopTitle, workshopDate, pdfStorageKey, verifyUrl } = opts;
 
-  const pdfBuffer = fs.readFileSync(pdfPath);
+  const pdfBuffer = await readStorageFile(pdfStorageKey);
   const fileName = `${participantName.replace(/\s+/g, "_")}_Certificate.pdf`;
 
   await getResend().emails.send({

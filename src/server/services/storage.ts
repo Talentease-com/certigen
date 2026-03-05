@@ -1,51 +1,67 @@
-import fs from "node:fs";
-import path from "node:path";
+import { useStorage } from "nitro/storage";
 
-function getTemplatesDir(): string {
-  return process.env.TEMPLATES_DIR || "./data/templates";
+function toBuffer(raw: Buffer | Uint8Array | unknown): Buffer {
+  if (Buffer.isBuffer(raw)) return raw;
+  if (raw instanceof Uint8Array) return Buffer.from(raw);
+  if (raw && typeof raw === "object" && "0" in raw) {
+    return Buffer.from(Object.values(raw as Record<string, number>));
+  }
+  throw new Error("Unexpected raw storage type");
 }
 
-function getCertificatesDir(): string {
-  return process.env.CERTIFICATES_DIR || "./data/certificates";
-}
-
-export function ensureDirectories(): void {
-  fs.mkdirSync(getTemplatesDir(), { recursive: true });
-  fs.mkdirSync(getCertificatesDir(), { recursive: true });
-}
-
-export function saveTemplate(
+export async function saveTemplate(
   id: string,
   buffer: Buffer,
   ext: string,
-): string {
-  const dir = getTemplatesDir();
-  fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `${id}${ext}`);
-  fs.writeFileSync(filePath, buffer);
-  return filePath;
+): Promise<string> {
+  const key = `${id}${ext}`;
+  const storage = useStorage("templates");
+  await storage.setItemRaw(key, buffer);
+  return `templates:${key}`;
 }
 
-export function getTemplatePath(id: string, ext: string): string {
-  return path.join(getTemplatesDir(), `${id}${ext}`);
+export async function getTemplateBuffer(
+  id: string,
+  ext: string,
+): Promise<Buffer> {
+  const key = `${id}${ext}`;
+  const storage = useStorage("templates");
+  const raw = await storage.getItemRaw(key);
+  return toBuffer(raw);
 }
 
-export function getCertificateOutputDir(workshopCode: string): string {
-  const dir = path.join(getCertificatesDir(), workshopCode);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+export async function saveCertificateFile(
+  workshopCode: string,
+  certId: string,
+  ext: string,
+  buffer: Buffer | Uint8Array,
+): Promise<string> {
+  const key = `${workshopCode}/${certId}${ext}`;
+  const storage = useStorage("certificates");
+  await storage.setItemRaw(key, Buffer.from(buffer));
+  return `certificates:${key}`;
 }
 
-export function readFile(filePath: string): Buffer {
-  return fs.readFileSync(filePath);
+export async function readStorageFile(storageKey: string): Promise<Buffer> {
+  const [mount, ...rest] = storageKey.split(":");
+  const key = rest.join(":");
+  const storage = useStorage(mount);
+  const raw = await storage.getItemRaw(key);
+  return toBuffer(raw);
 }
 
-export function fileExists(filePath: string): boolean {
-  return fs.existsSync(filePath);
+export async function storageFileExists(storageKey: string): Promise<boolean> {
+  const [mount, ...rest] = storageKey.split(":");
+  const key = rest.join(":");
+  const storage = useStorage(mount);
+  return await storage.hasItem(key);
 }
 
-export function deleteFile(filePath: string): void {
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
+export async function deleteStorageFile(storageKey: string): Promise<void> {
+  const [mount, ...rest] = storageKey.split(":");
+  const key = rest.join(":");
+  const storage = useStorage(mount);
+  if (await storage.hasItem(key)) {
+    await storage.removeItem(key);
   }
 }

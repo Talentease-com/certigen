@@ -9,7 +9,7 @@ import {
   type PlaceholderConfig,
 } from "../services/certificate-gen";
 import { sendCertificateEmail } from "../services/email";
-import { getCertificateOutputDir } from "../services/storage";
+import { readStorageFile, storageFileExists } from "../services/storage";
 
 const generateCertInput = z.object({
   name: z.string().min(1).max(100),
@@ -67,7 +67,9 @@ export const generateCertificate = createServerFn({ method: "POST" })
     const certId = generateCertId();
     const baseUrl = process.env.BASE_URL || "http://localhost:3000";
     const verifyUrl = `${baseUrl}/verify/${certId}`;
-    const outputDir = getCertificateOutputDir(workshopCode);
+
+    // Read template image from storage
+    const templateBuffer = await readStorageFile(template.filePath);
 
     const values: Record<string, string> = {
       name,
@@ -75,15 +77,15 @@ export const generateCertificate = createServerFn({ method: "POST" })
       date: workshop.date,
     };
 
-    const { pdfPath } = await generateCertificateImage({
-      templatePath: template.filePath,
+    const { pdfStorageKey } = await generateCertificateImage({
+      templateBuffer,
       templateWidth: template.width,
       templateHeight: template.height,
       placeholders: placeholderConfigs,
       values,
       certId,
       verifyUrl,
-      outputDir,
+      workshopCode,
     });
     // 5. Save to DB
     await db.insert(certificates).values({
@@ -91,13 +93,13 @@ export const generateCertificate = createServerFn({ method: "POST" })
       workshopId: workshop.id,
       name,
       email: email.toLowerCase(),
-      filePath: pdfPath,
+      filePath: pdfStorageKey,
     }).onConflictDoUpdate({
       target: [certificates.email, certificates.workshopId],
       set: {
         id: certId,
         name,
-        filePath: pdfPath,
+        filePath: pdfStorageKey,
         issuedAt: new Date(),
       }
     });
@@ -108,7 +110,7 @@ export const generateCertificate = createServerFn({ method: "POST" })
       participantName: name,
       workshopTitle: workshop.title,
       workshopDate: workshop.date,
-      pdfPath,
+      pdfStorageKey,
       verifyUrl,
     }).catch((err) => {
       console.error("Failed to send certificate email:", err);
@@ -212,12 +214,11 @@ export const downloadCertificate = createServerFn()
 
     if (!cert) throw new Error("Certificate not found");
 
-    const fs = await import("node:fs");
-    if (!fs.existsSync(cert.filePath)) {
+    if (!(await storageFileExists(cert.filePath))) {
       throw new Error("Certificate file not found on server");
     }
 
-    const pdfBuffer = fs.readFileSync(cert.filePath);
+    const pdfBuffer = await readStorageFile(cert.filePath);
     return {
       base64: pdfBuffer.toString("base64"),
       filename: `${cert.name.replace(/\s+/g, "_")}_Certificate.pdf`,
