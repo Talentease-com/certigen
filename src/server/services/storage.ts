@@ -1,23 +1,22 @@
 import { createStorage } from "unstorage";
-// import s3Driver from "unstorage/drivers/s3";
+import s3Driver from "unstorage/drivers/s3";
 import fsDriver from "unstorage/drivers/fs";
 
-// const isProd = process.env.NODE_ENV === "production";
+const isProd = process.env.NODE_ENV === "production";
 
 // Create an unstorage instance. Fallback to process.env.CF_ACCOUNT_ID if S3_ENDPOINT is not provided.
 const storage = createStorage({
-  // driver: isProd
-  //   ? s3Driver({
-  //       accessKeyId: process.env.S3_ACCESS_KEY_ID!,
-  //       secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
-  //       bucket: process.env.S3_BUCKET!,
-  //       endpoint: process.env.S3_ENDPOINT || (process.env.CF_ACCOUNT_ID ? `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com` : ""),
-  //       region: process.env.S3_REGION || "auto",
-  //     })
-  //   : 
-  driver: fsDriver({
-    base: "./data",
-  }),
+  driver: isProd
+    ? s3Driver({
+        accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+        bucket: process.env.S3_BUCKET!,
+        endpoint: process.env.S3_ENDPOINT || (process.env.CF_ACCOUNT_ID ? `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com` : ""),
+        region: process.env.S3_REGION || "auto",
+      })
+    : fsDriver({
+        base: "./data",
+      }),
 });
 
 export async function ensureDirectories(): Promise<void> {
