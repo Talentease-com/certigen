@@ -273,6 +273,9 @@ function TemplatesPage() {
   ]);
   const [editName, setEditName] = useState("");
   const [editFields, setEditFields] = useState<PlaceholderField[]>([]);
+  const [editFileBase64, setEditFileBase64] = useState<string | null>(null);
+  const [editSelectedFile, setEditSelectedFile] = useState<File | null>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -308,6 +311,24 @@ function TemplatesPage() {
       setFileBase64(base64);
     } else {
       setFileBase64(null);
+    }
+  };
+
+  const handleEditFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setEditSelectedFile(file);
+    setPreviewImg(null);
+    if (file) {
+      const buffer = await file.arrayBuffer();
+      const base64 = btoa(
+        new Uint8Array(buffer).reduce(
+          (data, byte) => data + String.fromCharCode(byte),
+          "",
+        ),
+      );
+      setEditFileBase64(base64);
+    } else {
+      setEditFileBase64(null);
     }
   };
 
@@ -347,10 +368,15 @@ function TemplatesPage() {
     setPreviewing(true);
     setPreviewImg(null);
     try {
+      const ext = editSelectedFile?.name.substring(
+        editSelectedFile.name.lastIndexOf("."),
+      );
       const res = await testPreviewTemplate({
         data: {
           token: identity.token,
           templateId: editingTemplate.id,
+          imageData: editFileBase64 || undefined,
+          imageExt: ext || undefined,
           placeholders: fieldsToJson(editFields),
           width: editingTemplate.width,
           height: editingTemplate.height,
@@ -405,6 +431,9 @@ function TemplatesPage() {
     setEditingTemplate(t);
     setEditName(t.name);
     setEditFields(jsonToFields(t.placeholders));
+    setEditFileBase64(null);
+    setEditSelectedFile(null);
+    if (editFileInputRef.current) editFileInputRef.current.value = "";
     setPreviewImg(null);
   };
 
@@ -413,12 +442,17 @@ function TemplatesPage() {
     if (!identity?.token || !editingTemplate) return;
     setSubmitting(true);
     try {
+      const ext = editSelectedFile?.name.substring(
+        editSelectedFile.name.lastIndexOf("."),
+      );
       await updateTemplate({
         data: {
           token: identity.token,
           id: editingTemplate.id,
           name: editName,
           placeholders: fieldsToJson(editFields),
+          imageData: editFileBase64 || undefined,
+          imageExt: ext || undefined,
         },
       });
       setEditingTemplate(null);
@@ -445,7 +479,7 @@ function TemplatesPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="w-6 h-6 border-2 border-[#F5A623]/30 border-t-[#F5A623] rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-te-orange/30 border-t-te-orange rounded-full animate-spin" />
       </div>
     );
   }
@@ -625,6 +659,8 @@ function TemplatesPage() {
           if (!open) {
             setEditingTemplate(null);
             setPreviewImg(null);
+            setEditFileBase64(null);
+            setEditSelectedFile(null);
           }
         }}
       >
@@ -638,7 +674,7 @@ function TemplatesPage() {
               className="flex flex-col h-full overflow-hidden"
             >
               {/* Modal Header */}
-              <div className="bg-gradient-to-r from-[#F5A623] to-[#D0021B] px-6 py-4 shrink-0">
+              <div className="bg-linear-to-r from-te-orange to-te-red px-6 py-4 shrink-0">
                 <DialogTitle className="text-lg font-bold text-white">
                   Edit Template
                 </DialogTitle>
@@ -662,6 +698,18 @@ function TemplatesPage() {
                         onChange={(e) => setEditName(e.target.value)}
                         className="input-field"
                         required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Update Template Image (Optional)
+                      </label>
+                      <input
+                        ref={editFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleEditFileChange}
+                        className="input-field"
                       />
                     </div>
                     <div>

@@ -5,9 +5,7 @@ import { templates } from "#/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireAdmin } from "../middleware/auth";
-import { saveTemplate, readFile } from "../services/storage";
-// @ts-ignore
-import { useStorage } from "nitro/storage";
+import { saveTemplate, readFile, deleteFile } from "../services/storage";
 
 const uploadTemplateInput = z.object({
   token: z.string(),
@@ -65,6 +63,8 @@ const updateTemplateInput = z.object({
   id: z.string(),
   name: z.string().optional(),
   placeholders: z.string().optional(),
+  imageData: z.string().optional(),
+  imageExt: z.string().optional(),
 });
 
 export const updateTemplate = createServerFn({ method: "POST" })
@@ -75,6 +75,13 @@ export const updateTemplate = createServerFn({ method: "POST" })
     const updates: Record<string, unknown> = {};
     if (data.name !== undefined) updates.name = data.name;
     if (data.placeholders !== undefined) updates.placeholders = data.placeholders;
+
+    if (data.imageData) {
+      const buffer = Buffer.from(data.imageData, "base64");
+      const ext = data.imageExt || ".png";
+      const filePath = await saveTemplate(data.id, buffer, ext);
+      updates.filePath = filePath;
+    }
 
     await db.update(templates).set(updates).where(eq(templates.id, data.id));
     return { success: true };
@@ -106,8 +113,7 @@ export const deleteTemplate = createServerFn({ method: "POST" })
     });
 
     if (template) {
-      // @ts-ignore
-      await useStorage().removeItem(template.filePath);
+      await deleteFile(template.filePath);
       await db.delete(templates).where(eq(templates.id, data.id));
     }
 
@@ -135,16 +141,16 @@ export const testPreviewTemplate = createServerFn({ method: "POST" })
 
     let templateBuffer: Buffer;
 
-    if (data.templateId) {
+    if (data.imageData) {
+      // Use uploaded image buffer
+      templateBuffer = Buffer.from(data.imageData, "base64");
+    } else if (data.templateId) {
       // Use existing template from storage
       const template = await db.query.templates.findFirst({
         where: eq(templates.id, data.templateId),
       });
       if (!template) throw new Error("Template not found");
       templateBuffer = await readFile(template.filePath);
-    } else if (data.imageData) {
-      // Use uploaded image buffer
-      templateBuffer = Buffer.from(data.imageData, "base64");
     } else {
       throw new Error("Provide either templateId or imageData");
     }
