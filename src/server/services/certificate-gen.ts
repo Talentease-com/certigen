@@ -1,10 +1,15 @@
 import sharp from "sharp";
 import QRCode from "qrcode";
 import { nanoid } from "nanoid";
-import PDFDocument from "pdfkit";
+
 import fs from "node:fs";
 import path from "node:path";
-import opentype from "opentype.js";
+// @ts-ignore
+import { useStorage } from "nitro/storage";
+// Must use wildcard import — fontkit registers font formats (TTFFont, WOFFFont,
+// etc.) as module-level side effects. Named imports cause Rollup to tree-shake
+// those registrations, leaving create() unable to parse any format.
+import * as fontkit from "fontkit";
 
 export interface PlaceholderConfig {
   key: string;
@@ -17,19 +22,16 @@ export interface PlaceholderConfig {
   maxWidth?: number;
 }
 
-interface GenerateCertificateOptions {
-  templatePath: string;
-  templateWidth: number;
-  templateHeight: number;
-  placeholders: PlaceholderConfig[];
-  values: Record<string, string>;
-  certId: string;
-  verifyUrl: string;
-  outputDir: string;
-}
 
-function getFontPath(fontFamily: string): string | null {
-  const map: Record<string, string> = {
+
+// biome-ignore lint: fontkit types not available
+const fontCache: Record<string, any> = {};
+
+// biome-ignore lint: fontkit types not available
+async function getFont(fontFamily: string): Promise<any | null> {
+  if (fontCache[fontFamily]) return fontCache[fontFamily];
+  
+  const fileMap: Record<string, string> = {
     "Inter": "Inter-Regular.ttf",
     "Roboto": "Roboto-Regular.ttf",
     "Open Sans": "OpenSans-Regular.ttf",
@@ -43,34 +45,43 @@ function getFontPath(fontFamily: string): string | null {
     "Satisfy": "Satisfy-Regular.ttf",
     "Caveat": "Caveat-Regular.ttf",
   };
-  const file = map[fontFamily];
-  return file ? path.join(process.cwd(), "public", "fonts", file) : null;
-}
 
-const fontCache: Record<string, opentype.Font> = {};
+  const fileName = fileMap[fontFamily];
+  if (!fileName) return null;
 
-function getFont(fontFamily: string): opentype.Font | null {
-  if (fontCache[fontFamily]) return fontCache[fontFamily];
-  const p = getFontPath(fontFamily);
-  if (!p || !fs.existsSync(p)) return null;
   try {
-    const f = opentype.loadSync(p);
-    fontCache[fontFamily] = f;
-    return f;
+    const key = `assets:public:fonts:${fileName}`;
+    // @ts-ignore
+    const buffer = await useStorage().getItemRaw(key);
+    
+    if (buffer) {
+      const f = fontkit.create(Buffer.from(buffer));
+      fontCache[fontFamily] = f;
+      return f;
+    }
+
+    // Fallback to FS if storage fails (dev env)
+    const p = path.join(process.cwd(), "public", "fonts", fileName);
+    if (fs.existsSync(p)) {
+      const f = fontkit.create(fs.readFileSync(p));
+      fontCache[fontFamily] = f;
+      return f;
+    }
+    
+    return null;
   } catch (err) {
-    console.error(`Failed to load opentype font for ${fontFamily}:`, err);
+    console.error(`Failed to load font for ${fontFamily}:`, err);
     return null;
   }
 }
 
-function buildTextSvg(
+async function buildTextSvg(
   placeholder: PlaceholderConfig,
   value: string,
   canvasWidth: number,
-): Buffer {
+): Promise<Buffer> {
   const {
     x,
-    y,
     fontSize,
     fontFamily,
     color,
@@ -78,10 +89,19 @@ function buildTextSvg(
     maxWidth,
   } = placeholder;
 
-  const font = getFont(fontFamily);
+  const font = await getFont(fontFamily);
 
   if (font) {
-    const textWidth = font.getAdvanceWidth(value, fontSize);
+    // Use fontkit's layout engine for accurate text measurement
+    const run = font.layout(value);
+    const scale = fontSize / font.unitsPerEm;
+
+    // Calculate total text width in pixels
+    const textWidth = run.positions.reduce(
+      (sum: number, pos: { xAdvance: number }) => sum + pos.xAdvance,
+      0,
+    ) * scale;
+
     let dx = x;
     if (align === "center") {
       dx = maxWidth ? x + maxWidth / 2 - textWidth / 2 : canvasWidth / 2 - textWidth / 2;
@@ -89,18 +109,45 @@ function buildTextSvg(
       dx = maxWidth ? x + maxWidth - textWidth : canvasWidth - textWidth;
     }
 
-    // Typical baseline is around ~1x to 1.5x font size down from the top inside a bounding box
+    // Baseline position within the SVG viewport
     const yOffset = fontSize * 1.5;
-    const pathObj = font.getPath(value, dx, yOffset, fontSize);
-    const svgPathData = pathObj.toPathData(2);
+
+    // Build combined SVG path from all glyphs
+    // Glyph paths are in font units with y-up, so we need to:
+    //   1. Position each glyph at its advance offset (font units)
+    //   2. Scale to target font size
+    //   3. Flip Y axis (font y-up → SVG y-down)
+    //   4. Translate to final position
+    let svgPaths = "";
+    let curX = 0; // cumulative x position in font units
+    for (let i = 0; i < run.glyphs.length; i++) {
+      const glyph = run.glyphs[i];
+      const pos = run.positions[i];
+      const glyphPath = glyph.path;
+
+      if (glyphPath.commands.length > 0) {
+        // Transform: translate to glyph position (font units), scale, flip Y,
+        // then translate to final SVG position
+        const transformed = glyphPath
+          .translate(curX + pos.xOffset, pos.yOffset)
+          .scale(scale, -scale)
+          .translate(dx, yOffset);
+
+        const pathData = transformed.toSVG();
+        if (pathData) {
+          svgPaths += `<path d="${pathData}" fill="${color}" />`;
+        }
+      }
+      curX += pos.xAdvance;
+    }
 
     const svg = `<svg width="${canvasWidth}" height="${fontSize * 3}" xmlns="http://www.w3.org/2000/svg">
-      <path d="${svgPathData}" fill="${color}" />
+      ${svgPaths}
     </svg>`;
     return Buffer.from(svg);
   }
 
-  // Fallback to standard SVG text if font not found or opentype fails
+  // Fallback to standard SVG text if font not found
   let textAnchor = "start";
   let dx = x;
   if (align === "center") {
@@ -131,18 +178,26 @@ function buildTextSvg(
   return Buffer.from(svg);
 }
 
+interface GenerateCertificateOptions {
+  templateBuffer: Buffer;
+  templateWidth: number;
+  templateHeight: number;
+  placeholders: PlaceholderConfig[];
+  values: Record<string, string>;
+  certId: string;
+  verifyUrl: string;
+}
+
 export async function generateCertificateImage(
   opts: GenerateCertificateOptions,
-): Promise<{ pngPath: string; pdfPath: string }> {
+): Promise<{ pngBuffer: Buffer }> {
   const {
-    templatePath,
+    templateBuffer,
     templateWidth,
     templateHeight,
     placeholders,
     values,
-    certId,
     verifyUrl,
-    outputDir,
   } = opts;
 
   // Generate QR code as PNG buffer
@@ -161,7 +216,7 @@ export async function generateCertificateImage(
     const value = values[placeholder.key];
     if (!value) continue;
 
-    const svgBuffer = buildTextSvg(placeholder, value, templateWidth);
+    const svgBuffer = await buildTextSvg(placeholder, value, templateWidth);
     composites.push({
       input: svgBuffer,
       top: placeholder.y,
@@ -177,35 +232,12 @@ export async function generateCertificateImage(
   });
 
   // Composite everything onto the template
-  const pngBuffer = await sharp(templatePath)
+  const pngBuffer = await sharp(templateBuffer)
     .composite(composites)
     .png({ quality: 90 })
     .toBuffer();
 
-  // Ensure output directory exists
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  // Save PNG
-  const pngPath = path.join(outputDir, `${certId}.png`);
-  fs.writeFileSync(pngPath, pngBuffer);
-
-  // Generate PDF with the image as a full page (A4 landscape)
-  const pdfPath = path.join(outputDir, `${certId}.pdf`);
-  await new Promise<void>((resolve, reject) => {
-    // A4 landscape: width=841.89pt, height=595.28pt
-    const doc = new PDFDocument({
-      size: [841.89, 595.28],
-      margin: 0,
-    });
-    const stream = fs.createWriteStream(pdfPath);
-    doc.pipe(stream);
-    doc.image(pngBuffer, 0, 0, { width: 841.89, height: 595.28 });
-    doc.end();
-    stream.on("finish", resolve);
-    stream.on("error", reject);
-  });
-
-  return { pngPath, pdfPath };
+  return { pngBuffer };
 }
 
 export function generateCertId(): string {

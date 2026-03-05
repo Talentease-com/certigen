@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import fs from "node:fs";
+
 
 let resend: Resend | null = null;
 function getResend() {
@@ -14,17 +14,16 @@ interface SendCertificateEmailOptions {
   participantName: string;
   workshopTitle: string;
   workshopDate: string;
-  pdfPath: string;
+  imageBuffer: Buffer;
   verifyUrl: string;
 }
 
 export async function sendCertificateEmail(
   opts: SendCertificateEmailOptions,
 ): Promise<void> {
-  const { to, participantName, workshopTitle, workshopDate, pdfPath, verifyUrl } = opts;
+  const { to, participantName, workshopTitle, workshopDate, imageBuffer, verifyUrl } = opts;
 
-  const pdfBuffer = fs.readFileSync(pdfPath);
-  const fileName = `${participantName.replace(/\s+/g, "_")}_Certificate.pdf`;
+  const fileName = `${participantName.replace(/\s+/g, "_")}_Certificate.png`;
 
   await getResend().emails.send({
     from: process.env.EMAIL_FROM || "certificates@talentease.com",
@@ -42,7 +41,7 @@ export async function sendCertificateEmail(
             You have successfully completed the <strong>${workshopTitle}</strong> workshop on <strong>${workshopDate}</strong>.
           </p>
           <p style="color: #333; font-size: 16px; line-height: 1.6;">
-            Your certificate of completion is attached to this email as a PDF. You can also verify your certificate anytime using the QR code printed on it, or by visiting:
+            Your certificate of completion is attached to this email as an image. You can also verify your certificate anytime using the QR code printed on it, or by visiting:
           </p>
           <div style="text-align: center; margin: 24px 0;">
             <a href="${verifyUrl}" style="display: inline-block; padding: 12px 28px; background: #F5A623; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">
@@ -59,7 +58,7 @@ export async function sendCertificateEmail(
     attachments: [
       {
         filename: fileName,
-        content: pdfBuffer,
+        content: imageBuffer,
       },
     ],
   });

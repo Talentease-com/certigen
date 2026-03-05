@@ -1,51 +1,47 @@
-import fs from "node:fs";
-import path from "node:path";
+// @ts-ignore
+import { useStorage } from "nitro/storage";
 
-function getTemplatesDir(): string {
-  return process.env.TEMPLATES_DIR || "./data/templates";
+export async function ensureDirectories(): Promise<void> {
+  // Nitro storage handles directory creation automatically with most drivers
 }
 
-function getCertificatesDir(): string {
-  return process.env.CERTIFICATES_DIR || "./data/certificates";
-}
-
-export function ensureDirectories(): void {
-  fs.mkdirSync(getTemplatesDir(), { recursive: true });
-  fs.mkdirSync(getCertificatesDir(), { recursive: true });
-}
-
-export function saveTemplate(
+export async function saveTemplate(
   id: string,
   buffer: Buffer,
   ext: string,
-): string {
-  const dir = getTemplatesDir();
-  fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `${id}${ext}`);
-  fs.writeFileSync(filePath, buffer);
-  return filePath;
+): Promise<string> {
+  const key = `data:templates:${id}${ext}`;
+  // @ts-ignore
+  await useStorage().setItemRaw(key, buffer);
+  return key;
 }
 
 export function getTemplatePath(id: string, ext: string): string {
-  return path.join(getTemplatesDir(), `${id}${ext}`);
+  return `data:templates:${id}${ext}`;
 }
 
 export function getCertificateOutputDir(workshopCode: string): string {
-  const dir = path.join(getCertificatesDir(), workshopCode);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  return `data:certificates:${workshopCode}`;
 }
 
-export function readFile(filePath: string): Buffer {
-  return fs.readFileSync(filePath);
+export async function saveFile(key: string, buffer: Buffer): Promise<void> {
+  // @ts-ignore
+  await useStorage().setItemRaw(key, buffer);
 }
 
-export function fileExists(filePath: string): boolean {
-  return fs.existsSync(filePath);
+export async function readFile(key: string): Promise<Buffer> {
+  // @ts-ignore
+  const data = await useStorage().getItemRaw(key);
+  if (!data) throw new Error(`File not found: ${key}`);
+  return Buffer.from(data);
 }
 
-export function deleteFile(filePath: string): void {
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
+export async function fileExists(key: string): Promise<boolean> {
+  // @ts-ignore
+  return await useStorage().hasItem(key);
+}
+
+export async function deleteFile(key: string): Promise<void> {
+  // @ts-ignore
+  await useStorage().removeItem(key);
 }
