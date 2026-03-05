@@ -46,6 +46,9 @@ export function isAdmin(pairwiseSub: string): boolean {
 export async function requireAdmin(idToken: string): Promise<ShooUser> {
   const user = await verifyShooToken(idToken);
   if (!isAdmin(user.pairwiseSub)) {
+    console.error(
+      `Admin access denied for user: ${user.pairwiseSub} (${user.email || "no email"})`,
+    );
     throw new Error("Unauthorized: not an admin");
   }
   return user;
