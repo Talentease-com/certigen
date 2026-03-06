@@ -1,35 +1,41 @@
 import { Resend } from "resend";
 
-
 let resend: Resend | null = null;
 function getResend() {
-  if (!resend) {
-    resend = new Resend(process.env.RESEND_API_KEY || "");
-  }
-  return resend;
+	if (!resend) {
+		resend = new Resend(process.env.RESEND_API_KEY || "");
+	}
+	return resend;
 }
 
 interface SendCertificateEmailOptions {
-  to: string;
-  participantName: string;
-  workshopTitle: string;
-  workshopDate: string;
-  imageBuffer: Buffer;
-  verifyUrl: string;
+	to: string;
+	participantName: string;
+	workshopTitle: string;
+	workshopDate: string;
+	imageBuffer: Buffer;
+	verifyUrl: string;
 }
 
 export async function sendCertificateEmail(
-  opts: SendCertificateEmailOptions,
+	opts: SendCertificateEmailOptions,
 ): Promise<void> {
-  const { to, participantName, workshopTitle, workshopDate, imageBuffer, verifyUrl } = opts;
+	const {
+		to,
+		participantName,
+		workshopTitle,
+		workshopDate,
+		imageBuffer,
+		verifyUrl,
+	} = opts;
 
-  const fileName = `${participantName.replace(/\s+/g, "_")}_Certificate.png`;
+	const fileName = `${participantName.replace(/\s+/g, "_")}_Certificate.png`;
 
-  await getResend().emails.send({
-    from: process.env.EMAIL_FROM || "certificates@talentease.com",
-    to,
-    subject: `Your Certificate of Completion — ${workshopTitle}`,
-    html: `
+	await getResend().emails.send({
+		from: process.env.EMAIL_FROM || "certificates@talentease.com",
+		to,
+		subject: `Your Certificate of Completion — ${workshopTitle}`,
+		html: `
       <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #fafafa; border-radius: 12px; overflow: hidden;">
         <div style="background: linear-gradient(135deg, #F5A623, #D0021B); padding: 32px 24px; text-align: center;">
           <h1 style="color: white; margin: 0; font-size: 24px; font-weight: 700;">
@@ -55,11 +61,11 @@ export async function sendCertificateEmail(
         </div>
       </div>
     `,
-    attachments: [
-      {
-        filename: fileName,
-        content: imageBuffer,
-      },
-    ],
-  });
+		attachments: [
+			{
+				filename: fileName,
+				content: imageBuffer,
+			},
+		],
+	});
 }
