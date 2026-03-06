@@ -2,14 +2,17 @@ import sharp from "sharp";
 import QRCode from "qrcode";
 import { nanoid } from "nanoid";
 
-import fs from "node:fs";
 import path from "node:path";
-// @ts-expect-error
-import { useStorage } from "nitro/storage";
+import { createStorage } from "unstorage";
+import fsDriver from "unstorage/drivers/fs-lite";
 // Must use wildcard import — fontkit registers font formats (TTFFont, WOFFFont,
 // etc.) as module-level side effects. Named imports cause Rollup to tree-shake
 // those registrations, leaving create() unable to parse any format.
 import * as fontkit from "fontkit";
+
+const fontStorage = createStorage({
+	driver: fsDriver({ base: path.join(process.cwd(), "public", "fonts") }),
+});
 
 export interface PlaceholderConfig {
 	key: string;
@@ -48,20 +51,10 @@ async function getFont(fontFamily: string): Promise<any | null> {
 	if (!fileName) return null;
 
 	try {
-		const key = `assets:public:fonts:${fileName}`;
-		// @ts-expect-error
-		const buffer = await useStorage().getItemRaw(key);
+		const buffer = await fontStorage.getItemRaw(fileName);
 
 		if (buffer) {
-			const f = fontkit.create(Buffer.from(buffer));
-			fontCache[fontFamily] = f;
-			return f;
-		}
-
-		// Fallback to FS if storage fails (dev env)
-		const p = path.join(process.cwd(), "public", "fonts", fileName);
-		if (fs.existsSync(p)) {
-			const f = fontkit.create(fs.readFileSync(p));
+			const f = fontkit.create(Buffer.from(buffer as ArrayBuffer));
 			fontCache[fontFamily] = f;
 			return f;
 		}
