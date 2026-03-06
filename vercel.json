@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "**/*": {
-      "includeFiles": "public/fonts/**"
-    }
-  }
-}

@@ -1,6 +1,10 @@
 import { defineNitroConfig } from 'nitro/config';
 
 export default defineNitroConfig({
+  serverAssets: [{
+    baseName: 'fonts',
+    dir: './public/fonts'
+  }],
   // storage: {
   //   persistent: {
   //     driver: 's3',

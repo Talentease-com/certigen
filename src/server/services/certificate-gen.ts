@@ -10,8 +10,13 @@ import fsDriver from "unstorage/drivers/fs-lite";
 // those registrations, leaving create() unable to parse any format.
 import * as fontkit from "fontkit";
 
+const isProd = process.env.NODE_ENV === "production";
+const fontsDir = isProd 
+  ? path.join(process.cwd(), "fonts")
+  : path.join(process.cwd(), "public", "fonts");
+
 const fontStorage = createStorage({
-	driver: fsDriver({ base: path.join(process.cwd(), "public", "fonts") }),
+	driver: fsDriver({ base: fontsDir }),
 });
 
 export interface PlaceholderConfig {
