@@ -18,6 +18,7 @@ export interface Template {
 	width: number;
 	height: number;
 	placeholders: string;
+	isActive: boolean;
 	createdAt: string;
 }
 
@@ -83,7 +84,10 @@ interface AdminState {
 			imageExt: string;
 		}>,
 	) => Promise<void>;
+	/** Soft-deletes: marks the template inactive, never removes the row. */
 	deleteTemplate: (id: string) => Promise<void>;
+	/** Reactivates a previously "deleted" (disabled) template. */
+	restoreTemplate: (id: string) => Promise<void>;
 }
 
 function authToken() {
@@ -164,6 +168,11 @@ export const useAdminStore = create<AdminState>((set, get) => ({
 
 	deleteTemplate: async (id) => {
 		await apiSend(`/api/admin/templates/${id}`, "DELETE", undefined, authToken());
+		await get().loadTemplates();
+	},
+
+	restoreTemplate: async (id) => {
+		await apiSend(`/api/admin/templates/${id}`, "PATCH", { isActive: true }, authToken());
 		await get().loadTemplates();
 	},
 }));

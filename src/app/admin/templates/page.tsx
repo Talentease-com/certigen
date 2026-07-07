@@ -219,8 +219,15 @@ function PlaceholderEditor({
 
 export default function TemplatesPage() {
 	const { identity } = useShooAuth();
-	const { templates: templatesList, loading, loadTemplates, uploadTemplate, updateTemplate, deleteTemplate } =
-		useAdminStore();
+	const {
+		templates: templatesList,
+		loading,
+		loadTemplates,
+		uploadTemplate,
+		updateTemplate,
+		deleteTemplate,
+		restoreTemplate,
+	} = useAdminStore();
 
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [showUpload, setShowUpload] = useState(false);
@@ -389,11 +396,24 @@ export default function TemplatesPage() {
 	};
 
 	const handleDelete = async (id: string) => {
-		if (!confirm("Delete this template?")) return;
+		if (
+			!confirm(
+				"Delete this template? It will be hidden from new workshops, but existing workshops and certificates that use it will keep working.",
+			)
+		)
+			return;
 		try {
 			await deleteTemplate(id);
 		} catch (err) {
 			alert(err instanceof Error ? err.message : "Failed to delete template");
+		}
+	};
+
+	const handleRestore = async (id: string) => {
+		try {
+			await restoreTemplate(id);
+		} catch (err) {
+			alert(err instanceof Error ? err.message : "Failed to restore template");
 		}
 	};
 
@@ -529,9 +549,17 @@ export default function TemplatesPage() {
 					</div>
 				) : (
 					templatesList.map((t) => (
-						<div key={t.id} className="glass-card rounded-xl p-5">
+						<div
+							key={t.id}
+							className={`glass-card rounded-xl p-5 ${!t.isActive ? "opacity-60" : ""}`}
+						>
 							<div className="flex items-start justify-between mb-3">
 								<h3 className="font-semibold text-gray-900 text-sm">{t.name}</h3>
+								{!t.isActive && (
+									<span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 text-[10px] font-semibold uppercase tracking-wider">
+										Disabled
+									</span>
+								)}
 							</div>
 							<div className="text-xs text-gray-500 space-y-1 mb-4">
 								<p>
@@ -548,13 +576,23 @@ export default function TemplatesPage() {
 								>
 									Edit
 								</button>
-								<button
-									type="button"
-									onClick={() => handleDelete(t.id)}
-									className="text-xs font-medium text-red-400 hover:text-red-600 transition-colors"
-								>
-									Delete
-								</button>
+								{t.isActive ? (
+									<button
+										type="button"
+										onClick={() => handleDelete(t.id)}
+										className="text-xs font-medium text-red-400 hover:text-red-600 transition-colors"
+									>
+										Delete
+									</button>
+								) : (
+									<button
+										type="button"
+										onClick={() => handleRestore(t.id)}
+										className="text-xs font-medium text-green-600 hover:text-green-700 transition-colors"
+									>
+										Restore
+									</button>
+								)}
 							</div>
 						</div>
 					))

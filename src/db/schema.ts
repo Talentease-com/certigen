@@ -25,6 +25,10 @@ export const templates = pgTable("templates", {
 	placeholders: text("placeholders").notNull().default("[]"),
 	width: integer("width").notNull().default(3508),
 	height: integer("height").notNull().default(2480),
+	// Templates are never hard-deleted (existing workshops/certificates may
+	// still depend on them to re-render). "Deleting" one from the admin UI
+	// just flips this to false, hiding it from new-workshop selection.
+	isActive: boolean("is_active").notNull().default(true),
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

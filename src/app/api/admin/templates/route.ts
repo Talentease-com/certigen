@@ -20,6 +20,7 @@ export async function GET(request: Request) {
 				width: templates.width,
 				height: templates.height,
 				placeholders: templates.placeholders,
+				isActive: templates.isActive,
 				createdAt: templates.createdAt,
 			})
 			.from(templates)
