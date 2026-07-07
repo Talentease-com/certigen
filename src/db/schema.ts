@@ -37,7 +37,9 @@ export const certificates = pgTable(
 			.references(() => workshops.id),
 		name: text("name").notNull(),
 		email: text("email").notNull(),
-		filePath: text("file_path").notNull(),
+		// The rendered certificate image is never persisted — it's regenerated
+		// on demand from the workshop's template + this row's data whenever
+		// someone downloads or previews it. Keeps storage limited to templates.
 		issuedAt: timestamp("issued_at").defaultNow().notNull(),
 	},
 	(table) => [

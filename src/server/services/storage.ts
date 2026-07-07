@@ -33,28 +33,8 @@ export async function saveTemplate(
 	return key;
 }
 
-export function getTemplatePath(id: string, ext: string): string {
-	return `templates/${id}${ext}`;
-}
-
-export function getCertificateOutputDir(workshopCode: string): string {
-	return `certificates/${workshopCode}`;
-}
-
-export async function saveFile(key: string, buffer: Buffer): Promise<void> {
-	await storage.setItemRaw(key, buffer);
-}
-
 export async function readFile(key: string): Promise<Buffer> {
 	const data = await storage.getItemRaw(key);
 	if (!data) throw new Error(`File not found: ${key}`);
 	return Buffer.from(data as ArrayBuffer);
-}
-
-export async function fileExists(key: string): Promise<boolean> {
-	return await storage.hasItem(key);
-}
-
-export async function deleteFile(key: string): Promise<void> {
-	await storage.removeItem(key);
 }

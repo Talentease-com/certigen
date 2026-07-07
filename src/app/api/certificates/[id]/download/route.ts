@@ -1,7 +1,4 @@
-import { eq } from "drizzle-orm";
-import { db } from "#/db";
-import { certificates } from "#/db/schema";
-import { readFile } from "#/server/services/storage";
+import { renderCertificateById } from "#/server/services/certificate-render";
 import { errorResponse } from "#/server/api-utils";
 
 export const runtime = "nodejs";
@@ -13,16 +10,12 @@ export async function GET(
 	const { id } = await params;
 
 	try {
-		const cert = await db.query.certificates.findFirst({
-			where: eq(certificates.id, id),
-		});
+		const rendered = await renderCertificateById(id);
+		if (!rendered) throw new Error("Certificate not found");
 
-		if (!cert) throw new Error("Certificate not found");
-
-		const fileBuffer = await readFile(cert.filePath);
 		return Response.json({
-			base64: fileBuffer.toString("base64"),
-			filename: `${cert.name.replace(/\s+/g, "_")}_Certificate.png`,
+			base64: rendered.pngBuffer.toString("base64"),
+			filename: rendered.filename,
 		});
 	} catch (err) {
 		return errorResponse(err, 404);

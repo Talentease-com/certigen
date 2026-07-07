@@ -3,17 +3,9 @@ import { z } from "zod";
 import { and, count, eq } from "drizzle-orm";
 import { db } from "#/db";
 import { certificates, templates, workshops } from "#/db/schema";
-import {
-	generateCertId,
-	generateCertificateImage,
-	type PlaceholderConfig,
-} from "#/server/services/certificate-gen";
+import { generateCertId } from "#/server/services/certificate-gen";
+import { renderCertificateById } from "#/server/services/certificate-render";
 import { sendCertificateEmail } from "#/server/services/email";
-import {
-	getCertificateOutputDir,
-	readFile,
-	saveFile,
-} from "#/server/services/storage";
 import { errorResponse, zodErrorResponse } from "#/server/api-utils";
 
 export const runtime = "nodejs";
@@ -59,7 +51,7 @@ export async function POST(request: Request) {
 			);
 		}
 
-		// 3. Load template
+		// 3. Confirm a template is configured (the render step will need it later)
 		const template = workshop.templateId
 			? await db.query.templates.findFirst({
 					where: eq(templates.id, workshop.templateId),
@@ -70,38 +62,10 @@ export async function POST(request: Request) {
 			throw new Error("No template configured for this workshop.");
 		}
 
-		const placeholderConfigs: PlaceholderConfig[] = JSON.parse(
-			template.placeholders,
-		);
-
-		// 4. Generate certificate
+		// 4. Record the certificate. No image is written to storage — it's
+		// rendered on demand (see renderCertificateById) whenever it's needed.
 		const certId = generateCertId();
-		const baseUrl = process.env.BASE_URL || "http://localhost:3000";
-		const verifyUrl = `${baseUrl}/verify/${certId}`;
-		const outputDir = getCertificateOutputDir(workshopCode);
 
-		const values: Record<string, string> = {
-			name,
-			workshop_title: workshop.title,
-			date: workshop.date,
-		};
-
-		const templateBuffer = await readFile(template.filePath);
-
-		const { pngBuffer } = await generateCertificateImage({
-			templateBuffer,
-			templateWidth: template.width,
-			templateHeight: template.height,
-			placeholders: placeholderConfigs,
-			values,
-			certId,
-			verifyUrl,
-		});
-
-		const fileKey = `${outputDir}/${certId}.png`;
-		await saveFile(fileKey, pngBuffer);
-
-		// 5. Save to DB
 		await db
 			.insert(certificates)
 			.values({
@@ -109,31 +73,34 @@ export async function POST(request: Request) {
 				workshopId: workshop.id,
 				name,
 				email: email.toLowerCase(),
-				filePath: fileKey,
 			})
 			.onConflictDoUpdate({
 				target: [certificates.email, certificates.workshopId],
 				set: {
 					id: certId,
 					name,
-					filePath: fileKey,
 					issuedAt: new Date(),
 				},
 			});
 
-		// 6. Send email (non-blocking)
+		// 5. Render once for the email attachment, then send (non-blocking)
+		const rendered = await renderCertificateById(certId);
+		if (!rendered) {
+			throw new Error("Failed to render certificate image.");
+		}
+
 		sendCertificateEmail({
 			to: email,
-			participantName: name,
-			workshopTitle: workshop.title,
-			workshopDate: workshop.date,
-			imageBuffer: pngBuffer,
-			verifyUrl,
+			participantName: rendered.name,
+			workshopTitle: rendered.workshopTitle,
+			workshopDate: rendered.workshopDate,
+			imageBuffer: rendered.pngBuffer,
+			verifyUrl: rendered.verifyUrl,
 		}).catch((err) => {
 			console.error("Failed to send certificate email:", err);
 		});
 
-		// 7. Return result
+		// 6. Return result
 		const remainingAttempts = 2 - (existing.total + 1);
 		return NextResponse.json({
 			certId,
