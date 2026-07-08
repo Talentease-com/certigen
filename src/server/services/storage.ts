@@ -2,8 +2,8 @@ import { createStorage } from "unstorage";
 import s3Driver from "unstorage/drivers/s3";
 import fsDriver from "unstorage/drivers/fs";
 
-const isProd = process.env.NODE_ENV === "production";
-
+// const isProd = process.env.NODE_ENV === "production";
+const isProd = true;
 // Create an unstorage instance. Fallback to process.env.CF_ACCOUNT_ID if S3_ENDPOINT is not provided.
 const storage = createStorage({
 	driver: isProd
