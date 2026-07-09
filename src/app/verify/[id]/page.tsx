@@ -11,16 +11,18 @@ async function getCertificate(id: string) {
 	});
 	if (!cert) return null;
 
-	const workshop = await db.query.workshops.findFirst({
-		where: eq(workshops.id, cert.workshopId),
-	});
+	const workshop = cert.workshopId
+		? await db.query.workshops.findFirst({
+				where: eq(workshops.id, cert.workshopId),
+			})
+		: null;
 
 	return {
 		id: cert.id,
 		name: cert.name,
 		email: cert.email,
-		workshopTitle: workshop?.title ?? "Unknown Workshop",
-		workshopDate: workshop?.date ?? "",
+		workshopTitle: cert.certificateTitle ?? workshop?.title ?? "Unknown Certificate",
+		workshopDate: cert.certificateDate ?? workshop?.date ?? "",
 		issuedAt: cert.issuedAt.toISOString(),
 	};
 }
@@ -128,7 +130,7 @@ export default async function VerifyPage({
 							<div className="grid grid-cols-2 gap-4">
 								<div>
 									<p className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-1">
-										Workshop
+										Certificate
 									</p>
 									<p className="text-sm font-semibold text-gray-800">
 										{cert.workshopTitle}
@@ -136,7 +138,7 @@ export default async function VerifyPage({
 								</div>
 								<div>
 									<p className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-1">
-										Workshop Date
+										Completion Date
 									</p>
 									<p className="text-sm font-semibold text-gray-800">
 										{cert.workshopDate}

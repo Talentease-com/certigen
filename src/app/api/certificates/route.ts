@@ -107,9 +107,14 @@ export async function POST(request: Request) {
 			.values({
 				id: certId,
 				workshopId: workshop.id,
+				templateId: template.id,
+				certificateTitle: workshop.title,
+				certificateDate: workshop.date,
 				name,
 				email: email.toLowerCase(),
 				filePath: fileKey,
+				emailStatus: "pending",
+				emailError: null,
 			})
 			.onConflictDoUpdate({
 				target: [certificates.email, certificates.workshopId],
@@ -117,6 +122,11 @@ export async function POST(request: Request) {
 					id: certId,
 					name,
 					filePath: fileKey,
+					templateId: template.id,
+					certificateTitle: workshop.title,
+					certificateDate: workshop.date,
+					emailStatus: "pending",
+					emailError: null,
 					issuedAt: new Date(),
 				},
 			});
@@ -129,9 +139,27 @@ export async function POST(request: Request) {
 			workshopDate: workshop.date,
 			imageBuffer: pngBuffer,
 			verifyUrl,
-		}).catch((err) => {
-			console.error("Failed to send certificate email:", err);
-		});
+		}).then(
+			() =>
+				db
+					.update(certificates)
+					.set({
+						emailStatus: "sent",
+						emailSentAt: new Date(),
+						emailError: null,
+					})
+					.where(eq(certificates.id, certId)),
+			(err) => {
+				console.error("Failed to send certificate email:", err);
+				return db
+					.update(certificates)
+					.set({
+						emailStatus: "failed",
+						emailError: err instanceof Error ? err.message : String(err),
+					})
+					.where(eq(certificates.id, certId));
+			},
+		);
 
 		// 7. Return result
 		const remainingAttempts = 2 - (existing.total + 1);

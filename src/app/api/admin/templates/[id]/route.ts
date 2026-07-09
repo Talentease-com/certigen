@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { count, eq } from "drizzle-orm";
 import { db } from "#/db";
-import { templates, workshops } from "#/db/schema";
+import { certificates, templates, workshops } from "#/db/schema";
 import { deleteFile, saveTemplate } from "#/server/services/storage";
 import { errorResponse, requireAdminFromRequest, zodErrorResponse } from "#/server/api-utils";
 
@@ -60,6 +60,17 @@ export async function DELETE(
 		if (refs.total > 0) {
 			throw new Error(
 				`Cannot delete: ${refs.total} workshop(s) use this template. Reassign them first.`,
+			);
+		}
+
+		const [certRefs] = await db
+			.select({ total: count() })
+			.from(certificates)
+			.where(eq(certificates.templateId, id));
+
+		if (certRefs.total > 0) {
+			throw new Error(
+				`Cannot delete: ${certRefs.total} certificate(s) use this template.`,
 			);
 		}
 

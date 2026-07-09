@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useShooAuth } from "@shoojs/react";
 import { apiSend } from "#/lib/api-client";
 import { useAdminStore, type Template } from "#/store/admin-store";
+import { useAuthStore } from "#/store/auth-store";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
 
 type PlaceholderField = {
@@ -218,7 +218,7 @@ function PlaceholderEditor({
 }
 
 export default function TemplatesPage() {
-	const { identity } = useShooAuth();
+	const token = useAuthStore((state) => state.token);
 	const { templates: templatesList, loading, loadTemplates, uploadTemplate, updateTemplate, deleteTemplate } =
 		useAdminStore();
 
@@ -239,8 +239,8 @@ export default function TemplatesPage() {
 	const [previewing, setPreviewing] = useState(false);
 
 	useEffect(() => {
-		if (identity?.token) loadTemplates();
-	}, [identity?.token, loadTemplates]);
+		if (token) loadTemplates();
+	}, [token, loadTemplates]);
 
 	const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
 		const file = e.target.files?.[0] || null;
@@ -273,7 +273,7 @@ export default function TemplatesPage() {
 	};
 
 	const handleTestPreview = async () => {
-		if (!identity?.token || !fileBase64) {
+		if (!token || !fileBase64) {
 			alert("Please select an image first");
 			return;
 		}
@@ -291,7 +291,7 @@ export default function TemplatesPage() {
 					width: 3508,
 					height: 2480,
 				},
-				identity.token,
+				token,
 			);
 			setPreviewImg(res.base64);
 		} catch (err) {
@@ -302,7 +302,7 @@ export default function TemplatesPage() {
 	};
 
 	const handleTestPreviewExisting = async () => {
-		if (!identity?.token || !editingTemplate) return;
+		if (!token || !editingTemplate) return;
 		setPreviewing(true);
 		setPreviewImg(null);
 		try {
@@ -318,7 +318,7 @@ export default function TemplatesPage() {
 					width: editingTemplate.width,
 					height: editingTemplate.height,
 				},
-				identity.token,
+				token,
 			);
 			setPreviewImg(res.base64);
 		} catch (err) {

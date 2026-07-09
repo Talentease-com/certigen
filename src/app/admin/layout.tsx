@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useShooAuth } from "@shoojs/react";
 import { Logo } from "#/components/logo";
+import { ApiError, apiGet } from "#/lib/api-client";
 import { useAuthStore } from "#/store/auth-store";
 
 const navItems: Array<{ to: string; label: string; exact?: boolean }> = [
@@ -12,6 +13,8 @@ const navItems: Array<{ to: string; label: string; exact?: boolean }> = [
 	{ to: "/admin/workshops", label: "Workshops" },
 	{ to: "/admin/templates", label: "Templates" },
 ];
+
+type AuthorizationState = "idle" | "checking" | "authorized" | "denied" | "error";
 
 export default function AdminLayout({
 	children,
@@ -21,12 +24,88 @@ export default function AdminLayout({
 	const { identity, loading, signIn, clearIdentity } = useShooAuth();
 	const pathname = usePathname();
 	const setIdentity = useAuthStore((s) => s.setIdentity);
+	const [authorization, setAuthorization] =
+		useState<AuthorizationState>("idle");
+	const [checkedToken, setCheckedToken] = useState<string | null>(null);
+	const [authorizationError, setAuthorizationError] = useState<string | null>(
+		null,
+	);
+	const [retryCount, setRetryCount] = useState(0);
 
 	useEffect(() => {
-		setIdentity({ token: identity?.token ?? null, userId: identity?.userId ?? null });
-	}, [identity?.token, identity?.userId, setIdentity]);
+		if (loading) return;
 
-	if (loading) {
+		if (!identity?.token || !identity.userId) {
+			setIdentity({ token: null, userId: null });
+			return;
+		}
+
+		let cancelled = false;
+		setIdentity({ token: null, userId: null });
+
+		void apiGet<{ user: { id: string; name: string | null } }>(
+			"/api/admin/session",
+			identity.token,
+		)
+			.then(() => {
+				if (cancelled) return;
+				setIdentity({ token: identity.token ?? null, userId: identity.userId });
+				setCheckedToken(identity.token ?? null);
+				setAuthorizationError(null);
+				setAuthorization("authorized");
+			})
+			.catch((err) => {
+				if (cancelled) return;
+
+				if (err instanceof ApiError && err.status === 401) {
+					clearIdentity();
+					setCheckedToken(null);
+					setAuthorization("idle");
+					return;
+				}
+
+				if (err instanceof ApiError && err.status === 403) {
+					setCheckedToken(identity.token ?? null);
+					setAuthorization("denied");
+					return;
+				}
+
+				setCheckedToken(identity.token ?? null);
+				setAuthorizationError(
+					err instanceof Error ? err.message : "Unable to verify admin access.",
+				);
+				setAuthorization("error");
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [
+		clearIdentity,
+		identity?.token,
+		identity?.userId,
+		loading,
+		retryCount,
+		setIdentity,
+	]);
+
+	const signOut = useCallback(() => {
+		setIdentity({ token: null, userId: null });
+		setCheckedToken(null);
+		clearIdentity();
+	}, [clearIdentity, setIdentity]);
+
+	const authorizationForIdentity =
+		identity?.token && checkedToken !== identity.token
+			? "checking"
+			: authorization;
+
+	const retryAuthorization = () => {
+		setCheckedToken(null);
+		setRetryCount((count) => count + 1);
+	};
+
+	if (loading || authorizationForIdentity === "checking") {
 		return (
 			<div className="min-h-screen flex items-center justify-center">
 				<div className="text-center animate-fade-in">
@@ -37,7 +116,7 @@ export default function AdminLayout({
 		);
 	}
 
-	if (!identity?.userId) {
+	if (!identity?.userId || !identity.token) {
 		return (
 			<div className="min-h-screen flex items-center justify-center px-4">
 				<div className="glass-card rounded-2xl p-10 text-center max-w-sm animate-scale-in">
@@ -57,6 +136,67 @@ export default function AdminLayout({
 				</div>
 			</div>
 		);
+	}
+
+	if (authorizationForIdentity === "denied") {
+		return (
+			<div className="min-h-screen flex items-center justify-center px-4">
+				<div className="glass-card rounded-2xl p-10 text-center max-w-sm animate-scale-in">
+					<h1 className="text-xl font-bold text-gray-900 mb-2">Access denied</h1>
+					<p className="text-gray-500 text-sm mb-6">
+						You are signed in, but this identity is not registered as a Certigen
+						administrator.
+					</p>
+					<div className="flex justify-center gap-3">
+						<button
+							type="button"
+							onClick={signOut}
+							className="btn-secondary"
+						>
+							Sign out
+						</button>
+						<button
+							type="button"
+							onClick={retryAuthorization}
+							className="btn-primary"
+						>
+							Retry
+						</button>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
+	if (authorizationForIdentity === "error") {
+		return (
+			<div className="min-h-screen flex items-center justify-center px-4">
+				<div className="glass-card rounded-2xl p-10 text-center max-w-sm animate-scale-in">
+					<h1 className="text-xl font-bold text-gray-900 mb-2">
+						Unable to verify access
+					</h1>
+					<p className="text-gray-500 text-sm mb-6">
+						{authorizationError ?? "Try again in a moment."}
+					</p>
+					<div className="flex justify-center gap-3">
+						<button type="button" onClick={signOut} className="btn-secondary">
+							Sign out
+						</button>
+						<button
+							type="button"
+							onClick={retryAuthorization}
+							className="btn-primary"
+						>
+							Retry
+						</button>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
+	if (authorizationForIdentity !== "authorized") {
+		return null;
 	}
 
 	return (
@@ -92,7 +232,7 @@ export default function AdminLayout({
 						</nav>
 						<button
 							type="button"
-							onClick={clearIdentity}
+							onClick={signOut}
 							className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
 						>
 							Sign out

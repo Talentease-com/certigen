@@ -16,6 +16,10 @@
 # next.js
 /.next/
 /out/
+/.output/
+/.nitro/
+/dist/
+/data/
 
 # production
 /build

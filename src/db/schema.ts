@@ -33,14 +33,26 @@ export const certificates = pgTable(
 	{
 		id: text("id").primaryKey(),
 		workshopId: text("workshop_id")
-			.notNull()
 			.references(() => workshops.id),
+		templateId: text("template_id").references(() => templates.id),
+		sourcePlatform: text("source_platform"),
+		externalId: text("external_id"),
+		idempotencyKey: text("idempotency_key"),
+		certificateTitle: text("certificate_title"),
+		certificateDate: text("certificate_date"),
 		name: text("name").notNull(),
 		email: text("email").notNull(),
 		filePath: text("file_path").notNull(),
+		emailStatus: text("email_status").notNull().default("pending"),
+		emailSentAt: timestamp("email_sent_at"),
+		emailError: text("email_error"),
 		issuedAt: timestamp("issued_at").defaultNow().notNull(),
 	},
 	(table) => [
 		uniqueIndex("cert_email_workshop_idx").on(table.email, table.workshopId),
+		uniqueIndex("cert_source_idempotency_idx").on(
+			table.sourcePlatform,
+			table.idempotencyKey,
+		),
 	],
 );

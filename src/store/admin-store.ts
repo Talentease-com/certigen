@@ -29,6 +29,8 @@ export interface CertificateRow {
 	workshopTitle: string;
 	workshopCode: string;
 	workshopDate: string;
+	sourcePlatform?: string | null;
+	emailStatus?: string;
 }
 
 export interface Stats {
