@@ -17,7 +17,7 @@ export interface Template {
 	name: string;
 	width: number;
 	height: number;
-	placeholders: string;
+	design: string;
 	isActive: boolean;
 	createdAt: string;
 }
@@ -71,19 +71,9 @@ interface AdminState {
 		name: string;
 		imageData: string;
 		imageExt: string;
-		placeholders: string;
 		width: number;
 		height: number;
 	}) => Promise<void>;
-	updateTemplate: (
-		id: string,
-		data: Partial<{
-			name: string;
-			placeholders: string;
-			imageData: string;
-			imageExt: string;
-		}>,
-	) => Promise<void>;
 	/** Soft-deletes: marks the template inactive, never removes the row. */
 	deleteTemplate: (id: string) => Promise<void>;
 	/** Reactivates a previously "deleted" (disabled) template. */
@@ -158,11 +148,6 @@ export const useAdminStore = create<AdminState>((set, get) => ({
 
 	uploadTemplate: async (data) => {
 		await apiSend("/api/admin/templates", "POST", data, authToken());
-		await get().loadTemplates();
-	},
-
-	updateTemplate: async (id, data) => {
-		await apiSend(`/api/admin/templates/${id}`, "PATCH", data, authToken());
 		await get().loadTemplates();
 	},
 

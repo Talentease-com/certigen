@@ -1,10 +1,8 @@
 import { eq } from "drizzle-orm";
 import { db } from "#/db";
 import { certificates, templates, workshops } from "#/db/schema";
-import {
-	generateCertificateImage,
-	type PlaceholderConfig,
-} from "./certificate-gen";
+import { parseCertificateDesign } from "#/lib/certificate-design";
+import { generateCertificateImage } from "./certificate-gen";
 import { readFile } from "./storage";
 
 export interface RenderedCertificate {
@@ -42,23 +40,21 @@ export async function renderCertificateById(
 		: null;
 	if (!template) return null;
 
-	const placeholders: PlaceholderConfig[] = JSON.parse(template.placeholders);
+	const design = parseCertificateDesign(template.design);
 	const baseUrl = process.env.BASE_URL || "http://localhost:3000";
 	const verifyUrl = `${baseUrl}/verify/${cert.id}`;
 	const templateBuffer = await readFile(template.filePath);
 
 	const { pngBuffer } = await generateCertificateImage({
 		templateBuffer,
-		templateWidth: template.width,
-		templateHeight: template.height,
-		placeholders,
+		elements: design.elements,
 		values: {
 			name: cert.name,
 			workshop_title: workshop.title,
 			date: workshop.date,
 		},
-		certId: cert.id,
 		verifyUrl,
+		resolveAsset: readFile,
 	});
 
 	return {

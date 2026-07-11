@@ -4,6 +4,7 @@ import { desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "#/db";
 import { templates } from "#/db/schema";
+import { defaultDesign, serializeCertificateDesign } from "#/lib/certificate-design";
 import { saveTemplate } from "#/server/services/storage";
 import { errorResponse, requireAdminFromRequest, zodErrorResponse } from "#/server/api-utils";
 
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
 				name: templates.name,
 				width: templates.width,
 				height: templates.height,
-				placeholders: templates.placeholders,
+				design: templates.design,
 				isActive: templates.isActive,
 				createdAt: templates.createdAt,
 			})
@@ -36,7 +37,6 @@ const uploadTemplateInput = z.object({
 	name: z.string().min(1),
 	imageData: z.string(), // Base64
 	imageExt: z.string().default(".png"),
-	placeholders: z.string(), // JSON
 	width: z.number().default(3508),
 	height: z.number().default(2480),
 });
@@ -53,11 +53,16 @@ export async function POST(request: Request) {
 		const buffer = Buffer.from(data.imageData, "base64");
 		const filePath = await saveTemplate(id, buffer, data.imageExt);
 
+		// Give every new template a sensible starting layout (name / workshop
+		// title / date / QR) so it's immediately usable; the admin can then
+		// open the canvas editor to reposition things or add logos.
+		const design = defaultDesign(data.width, data.height);
+
 		await db.insert(templates).values({
 			id,
 			name: data.name,
 			filePath,
-			placeholders: data.placeholders,
+			design: serializeCertificateDesign(design),
 			width: data.width,
 			height: data.height,
 		});

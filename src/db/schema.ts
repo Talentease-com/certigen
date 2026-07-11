@@ -21,8 +21,8 @@ export const templates = pgTable("templates", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
 	filePath: text("file_path").notNull(),
-	// JSON: [{key, x, y, fontSize, fontFamily, color, align}]
-	placeholders: text("placeholders").notNull().default("[]"),
+	// JSON: CertificateDesign — see src/lib/certificate-design.ts
+	design: text("design").notNull().default('{"elements":[]}'),
 	width: integer("width").notNull().default(3508),
 	height: integer("height").notNull().default(2480),
 	// Templates are never hard-deleted (existing workshops/certificates may

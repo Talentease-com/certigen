@@ -3,10 +3,8 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "#/db";
 import { templates } from "#/db/schema";
-import {
-	generateCertId,
-	generateCertificateImage,
-} from "#/server/services/certificate-gen";
+import { certificateElementSchema } from "#/lib/certificate-design";
+import { generateCertificateImage } from "#/server/services/certificate-gen";
 import { readFile } from "#/server/services/storage";
 import { errorResponse, requireAdminFromRequest, zodErrorResponse } from "#/server/api-utils";
 
@@ -16,9 +14,7 @@ const testPreviewInput = z.object({
 	templateId: z.string().optional(),
 	imageData: z.string().optional(),
 	imageExt: z.string().optional(),
-	placeholders: z.string(),
-	width: z.number(),
-	height: z.number(),
+	elements: z.array(certificateElementSchema),
 });
 
 export async function POST(request: Request) {
@@ -43,14 +39,9 @@ export async function POST(request: Request) {
 			throw new Error("Provide either templateId or imageData");
 		}
 
-		const placeholders = JSON.parse(data.placeholders);
-		const certId = generateCertId();
-
 		const { pngBuffer } = await generateCertificateImage({
 			templateBuffer,
-			templateWidth: data.width,
-			templateHeight: data.height,
-			placeholders,
+			elements: data.elements,
 			values: {
 				name: "Jane Doe",
 				workshop_title: "Sample Workshop Title",
@@ -60,8 +51,8 @@ export async function POST(request: Request) {
 					day: "numeric",
 				}),
 			},
-			certId,
 			verifyUrl: "https://certify.talentease.com/verify/example",
+			resolveAsset: readFile,
 		});
 
 		return NextResponse.json({ base64: pngBuffer.toString("base64") });

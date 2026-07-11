@@ -20,6 +20,9 @@
 # production
 /build
 
+# local filesystem storage driver output (template images, uploaded assets)
+/data/
+
 # misc
 .DS_Store
 *.pem

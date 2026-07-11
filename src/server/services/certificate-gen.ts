@@ -9,23 +9,13 @@ import fsDriver from "unstorage/drivers/fs-lite";
 // etc.) as module-level side effects. Named imports cause bundlers to tree-shake
 // those registrations, leaving create() unable to parse any format.
 import * as fontkit from "fontkit";
+import type { CertificateElement, TextElement } from "#/lib/certificate-design";
 
 const fontsDir = path.join(process.cwd(), "public", "fonts");
 
 const fontStorage = createStorage({
 	driver: fsDriver({ base: fontsDir }),
 });
-
-export interface PlaceholderConfig {
-	key: string;
-	x: number;
-	y: number;
-	fontSize: number;
-	fontFamily: string;
-	color: string;
-	align: "left" | "center" | "right";
-	maxWidth?: number;
-}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fontkit ships no types
 const fontCache: Record<string, any> = {};
@@ -68,12 +58,15 @@ async function getFont(fontFamily: string): Promise<any | null> {
 	}
 }
 
-async function buildTextSvg(
-	placeholder: PlaceholderConfig,
-	value: string,
-	canvasWidth: number,
-): Promise<Buffer> {
-	const { x, fontSize, fontFamily, color, align, maxWidth } = placeholder;
+/**
+ * Renders a text element into its own SVG, sized to the element's box
+ * (width × a height derived from font size), with the value aligned inside
+ * that box. The result is composited at (el.x, el.y) — the box IS the
+ * element, so what the editor shows is what gets drawn.
+ */
+async function buildTextSvg(el: TextElement, value: string): Promise<Buffer> {
+	const { width, fontSize, fontFamily, color, align, opacity } = el;
+	const svgHeight = Math.ceil(fontSize * 1.6);
 
 	const font = await getFont(fontFamily);
 
@@ -82,41 +75,29 @@ async function buildTextSvg(
 		const run = font.layout(value);
 		const scale = fontSize / font.unitsPerEm;
 
-		// Calculate total text width in pixels
 		const textWidth =
 			run.positions.reduce(
 				(sum: number, pos: { xAdvance: number }) => sum + pos.xAdvance,
 				0,
 			) * scale;
 
-		let dx = x;
-		if (align === "center") {
-			dx = maxWidth
-				? x + maxWidth / 2 - textWidth / 2
-				: canvasWidth / 2 - textWidth / 2;
-		} else if (align === "right") {
-			dx = maxWidth ? x + maxWidth - textWidth : canvasWidth - textWidth;
-		}
+		let dx = 0;
+		if (align === "center") dx = width / 2 - textWidth / 2;
+		else if (align === "right") dx = width - textWidth;
 
-		// Baseline position within the SVG viewport
-		const yOffset = fontSize * 1.5;
+		const yOffset = fontSize;
 
-		// Build combined SVG path from all glyphs
-		// Glyph paths are in font units with y-up, so we need to:
-		//   1. Position each glyph at its advance offset (font units)
-		//   2. Scale to target font size
-		//   3. Flip Y axis (font y-up → SVG y-down)
-		//   4. Translate to final position
+		// Build combined SVG path from all glyphs. Glyph paths are in font
+		// units with y-up, so: position at advance offset, scale to font size,
+		// flip Y (font y-up → SVG y-down), then translate into the box.
 		let svgPaths = "";
-		let curX = 0; // cumulative x position in font units
+		let curX = 0;
 		for (let i = 0; i < run.glyphs.length; i++) {
 			const glyph = run.glyphs[i];
 			const pos = run.positions[i];
 			const glyphPath = glyph.path;
 
 			if (glyphPath.commands.length > 0) {
-				// Transform: translate to glyph position (font units), scale, flip Y,
-				// then translate to final SVG position
 				const transformed = glyphPath
 					.translate(curX + pos.xOffset, pos.yOffset)
 					.scale(scale, -scale)
@@ -124,27 +105,26 @@ async function buildTextSvg(
 
 				const pathData = transformed.toSVG();
 				if (pathData) {
-					svgPaths += `<path d="${pathData}" fill="${color}" />`;
+					svgPaths += `<path d="${pathData}" fill="${color}" fill-opacity="${opacity}" />`;
 				}
 			}
 			curX += pos.xAdvance;
 		}
 
-		const svg = `<svg width="${canvasWidth}" height="${fontSize * 3}" xmlns="http://www.w3.org/2000/svg">
-      ${svgPaths}
-    </svg>`;
-		return Buffer.from(svg);
+		return Buffer.from(
+			`<svg width="${width}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">${svgPaths}</svg>`,
+		);
 	}
 
-	// Fallback to standard SVG text if font not found
+	// Fallback to standard SVG text if the font file wasn't found
 	let textAnchor = "start";
-	let dx = x;
+	let dx = 0;
 	if (align === "center") {
 		textAnchor = "middle";
-		dx = maxWidth ? x + maxWidth / 2 : canvasWidth / 2;
+		dx = width / 2;
 	} else if (align === "right") {
 		textAnchor = "end";
-		dx = maxWidth ? x + maxWidth : canvasWidth;
+		dx = width;
 	}
 
 	const escapedValue = value
@@ -152,75 +132,81 @@ async function buildTextSvg(
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;");
 
-	const svg = `<svg width="${canvasWidth}" height="${fontSize * 3}" xmlns="http://www.w3.org/2000/svg">
-    <text
-      x="${dx}"
-      y="${fontSize * 1.5}"
-      font-size="${fontSize}px"
-      font-family="'${fontFamily}', sans-serif"
-      fill="${color}"
-      text-anchor="${textAnchor}"
-      dominant-baseline="alphabetic"
-    >${escapedValue}</text>
-  </svg>`;
+	return Buffer.from(
+		`<svg width="${width}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">
+			<text x="${dx}" y="${fontSize}" font-size="${fontSize}px" font-family="'${fontFamily}', sans-serif" fill="${color}" fill-opacity="${opacity}" text-anchor="${textAnchor}" dominant-baseline="alphabetic">${escapedValue}</text>
+		</svg>`,
+	);
+}
 
-	return Buffer.from(svg);
+/** Scales down an overlay's alpha channel by `opacity` before compositing. */
+async function applyOpacity(buffer: Buffer, opacity: number): Promise<Buffer> {
+	if (opacity >= 1) return buffer;
+	const mask = Buffer.from(
+		`<svg><rect width="100%" height="100%" fill="black" fill-opacity="${opacity}"/></svg>`,
+	);
+	return sharp(buffer)
+		.ensureAlpha()
+		.composite([{ input: mask, blend: "dest-in" }])
+		.png()
+		.toBuffer();
 }
 
 interface GenerateCertificateOptions {
 	templateBuffer: Buffer;
-	templateWidth: number;
-	templateHeight: number;
-	placeholders: PlaceholderConfig[];
+	elements: CertificateElement[];
 	values: Record<string, string>;
-	certId: string;
 	verifyUrl: string;
+	/** Fetches the raw bytes for an image element's `storageKey`. */
+	resolveAsset: (storageKey: string) => Promise<Buffer>;
 }
 
 export async function generateCertificateImage(
 	opts: GenerateCertificateOptions,
 ): Promise<{ pngBuffer: Buffer }> {
-	const {
-		templateBuffer,
-		templateWidth,
-		templateHeight,
-		placeholders,
-		values,
-		verifyUrl,
-	} = opts;
+	const { templateBuffer, elements, values, verifyUrl, resolveAsset } = opts;
 
-	// Generate QR code as PNG buffer
-	const qrBuffer = await QRCode.toBuffer(verifyUrl, {
-		width: 280,
-		margin: 1,
-		color: { dark: "#333333", light: "#ffffff" },
-		errorCorrectionLevel: "H",
-	});
-
-	// Build composite layers
 	const composites: OverlayOptions[] = [];
 
-	// Add text overlays
-	for (const placeholder of placeholders) {
-		const value = values[placeholder.key];
-		if (!value) continue;
+	// zIndex controls paint order — lower first, higher on top.
+	const ordered = [...elements].sort((a, b) => a.zIndex - b.zIndex);
 
-		const svgBuffer = await buildTextSvg(placeholder, value, templateWidth);
-		composites.push({
-			input: svgBuffer,
-			top: placeholder.y,
-			left: placeholder.align === "center" ? 0 : placeholder.x,
-		});
+	for (const el of ordered) {
+		const left = Math.round(el.x);
+		const top = Math.round(el.y);
+
+		if (el.type === "text") {
+			const value = el.boundTo ? values[el.boundTo] : el.content;
+			if (!value) continue;
+			const svgBuffer = await buildTextSvg(el, value);
+			composites.push({ input: svgBuffer, top, left });
+		} else if (el.type === "image") {
+			const raw = await resolveAsset(el.storageKey);
+			const resized = await sharp(raw)
+				.resize(Math.round(el.width), Math.round(el.height), { fit: "fill" })
+				.ensureAlpha()
+				.png()
+				.toBuffer();
+			composites.push({
+				input: await applyOpacity(resized, el.opacity),
+				top,
+				left,
+			});
+		} else if (el.type === "qr") {
+			const qrBuffer = await QRCode.toBuffer(verifyUrl, {
+				width: Math.round(el.width),
+				margin: 1,
+				color: { dark: "#333333", light: "#ffffff" },
+				errorCorrectionLevel: "H",
+			});
+			composites.push({
+				input: await applyOpacity(qrBuffer, el.opacity),
+				top,
+				left,
+			});
+		}
 	}
 
-	// Add QR code (bottom-right corner, with padding)
-	composites.push({
-		input: qrBuffer,
-		top: templateHeight - 320,
-		left: templateWidth - 320,
-	});
-
-	// Composite everything onto the template
 	const pngBuffer = await sharp(templateBuffer)
 		.composite(composites)
 		.png({ quality: 90 })

@@ -33,6 +33,18 @@ export async function saveTemplate(
 	return key;
 }
 
+/** Saves an extra design asset (logo, signature, seal, ...) for a template. */
+export async function saveTemplateAsset(
+	templateId: string,
+	assetId: string,
+	buffer: Buffer,
+	ext: string,
+): Promise<string> {
+	const key = `templates/${templateId}/assets/${assetId}${ext}`;
+	await storage.setItemRaw(key, buffer);
+	return key;
+}
+
 export async function readFile(key: string): Promise<Buffer> {
 	const data = await storage.getItemRaw(key);
 	if (!data) throw new Error(`File not found: ${key}`);
