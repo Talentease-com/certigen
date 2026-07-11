@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useShooAuth } from "@shoojs/react";
-import { useAdminStore } from "#/store/admin-store";
+import { useAdminStore, type Template } from "#/store/admin-store";
+import { apiSend } from "#/lib/api-client";
+import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
 
 export default function TemplatesPage() {
 	const { identity } = useShooAuth();
@@ -22,6 +24,11 @@ export default function TemplatesPage() {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [fileBase64, setFileBase64] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
+
+	const [previewFor, setPreviewFor] = useState<Template | null>(null);
+	const [previewingId, setPreviewingId] = useState<string | null>(null);
+	const [previewImage, setPreviewImage] = useState<string | null>(null);
+	const [previewError, setPreviewError] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (identity?.token) loadTemplates();
@@ -85,6 +92,27 @@ export default function TemplatesPage() {
 			await restoreTemplate(id);
 		} catch (err) {
 			alert(err instanceof Error ? err.message : "Failed to restore template");
+		}
+	};
+
+	const handlePreview = async (t: Template) => {
+		setPreviewFor(t);
+		setPreviewImage(null);
+		setPreviewError(null);
+		setPreviewingId(t.id);
+		try {
+			const design = JSON.parse(t.design);
+			const res = await apiSend<{ base64: string }>(
+				"/api/admin/templates/preview",
+				"POST",
+				{ templateId: t.id, elements: design.elements },
+				identity?.token,
+			);
+			setPreviewImage(res.base64);
+		} catch (err) {
+			setPreviewError(err instanceof Error ? err.message : "Failed to generate preview");
+		} finally {
+			setPreviewingId(null);
 		}
 	};
 
@@ -194,6 +222,14 @@ export default function TemplatesPage() {
 								<p>{new Date(t.createdAt).toLocaleDateString()}</p>
 							</div>
 							<div className="flex items-center gap-3 pt-3 border-t border-gray-100">
+								<button
+									type="button"
+									onClick={() => handlePreview(t)}
+									disabled={previewingId === t.id}
+									className="text-xs font-medium text-gray-600 hover:text-gray-900 transition-colors disabled:opacity-50"
+								>
+									{previewingId === t.id ? "Generating..." : "Preview"}
+								</button>
 								<Link
 									href={`/admin/templates/${t.id}/edit`}
 									className="text-xs font-medium text-blue-500 hover:text-blue-700 transition-colors"
@@ -222,6 +258,52 @@ export default function TemplatesPage() {
 					))
 				)}
 			</div>
+
+			<Dialog
+				open={!!previewFor}
+				onOpenChange={(open) => {
+					if (!open) {
+						setPreviewFor(null);
+						setPreviewImage(null);
+						setPreviewError(null);
+					}
+				}}
+			>
+				<DialogContent className="sm:max-w-2xl">
+					<DialogTitle>{previewFor?.name} — Preview</DialogTitle>
+					<div className="bg-gray-100 rounded-xl border-2 border-dashed border-gray-200 min-h-[300px] flex items-center justify-center overflow-hidden">
+						{previewImage ? (
+							// eslint-disable-next-line @next/next/no-img-element
+							<img
+								src={`data:image/png;base64,${previewImage}`}
+								alt="Certificate preview"
+								className="w-full h-auto rounded-lg"
+							/>
+						) : previewError ? (
+							<p className="text-sm text-red-600 p-6 text-center">{previewError}</p>
+						) : (
+							<div className="w-6 h-6 border-2 border-te-orange/30 border-t-te-orange rounded-full animate-spin" />
+						)}
+					</div>
+					<div className="flex justify-end gap-3 mt-2">
+						<button
+							type="button"
+							className="btn-secondary text-sm"
+							onClick={() => setPreviewFor(null)}
+						>
+							Close
+						</button>
+						{previewFor && (
+							<Link
+								href={`/admin/templates/${previewFor.id}/edit`}
+								className="btn-primary text-sm"
+							>
+								Edit Placement
+							</Link>
+						)}
+					</div>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }
