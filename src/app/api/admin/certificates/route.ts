@@ -17,12 +17,16 @@ export async function GET(request: Request) {
 				name: certificates.name,
 				email: certificates.email,
 				issuedAt: certificates.issuedAt,
+				certificateTitle: certificates.certificateTitle,
+				certificateDate: certificates.certificateDate,
+				sourcePlatform: certificates.sourcePlatform,
+				emailStatus: certificates.emailStatus,
 				workshopTitle: workshops.title,
 				workshopCode: workshops.code,
 				workshopDate: workshops.date,
 			})
 			.from(certificates)
-			.innerJoin(workshops, eq(certificates.workshopId, workshops.id))
+			.leftJoin(workshops, eq(certificates.workshopId, workshops.id))
 			.orderBy(desc(certificates.issuedAt))
 			.$dynamic();
 
@@ -31,7 +35,15 @@ export async function GET(request: Request) {
 		}
 
 		const rows = await query;
-		return NextResponse.json({ certificates: rows });
+		return NextResponse.json({
+			certificates: rows.map((row) => ({
+				...row,
+				workshopTitle:
+					row.certificateTitle ?? row.workshopTitle ?? "Unknown Certificate",
+				workshopCode: row.workshopCode ?? row.sourcePlatform ?? "service",
+				workshopDate: row.certificateDate ?? row.workshopDate ?? "",
+			})),
+		});
 	} catch (err) {
 		return errorResponse(err);
 	}

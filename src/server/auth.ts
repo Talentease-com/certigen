@@ -44,12 +44,22 @@ export function isAdmin(pairwiseSub: string): boolean {
 }
 
 export async function requireAdmin(idToken: string): Promise<ShooUser> {
-	const user = await verifyShooToken(idToken);
+	let user: ShooUser;
+	try {
+		user = await verifyShooToken(idToken);
+	} catch {
+		throw Object.assign(new Error("Unauthorized: invalid token"), {
+			status: 401,
+		});
+	}
+
 	if (!isAdmin(user.pairwiseSub)) {
 		console.error(
 			`Admin access denied for user: ${user.pairwiseSub} (${user.email || "no email"})`,
 		);
-		throw new Error("Unauthorized: not an admin");
+		throw Object.assign(new Error("Forbidden: not an admin"), {
+			status: 403,
+		});
 	}
 	return user;
 }

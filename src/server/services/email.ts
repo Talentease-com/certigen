@@ -15,6 +15,7 @@ interface SendCertificateEmailOptions {
 	workshopDate: string;
 	imageBuffer: Buffer;
 	verifyUrl: string;
+	certificateKind?: "workshop" | "course" | "program";
 }
 
 export async function sendCertificateEmail(
@@ -27,9 +28,16 @@ export async function sendCertificateEmail(
 		workshopDate,
 		imageBuffer,
 		verifyUrl,
+		certificateKind = "workshop",
 	} = opts;
 
 	const fileName = `${participantName.replace(/\s+/g, "_")}_Certificate.png`;
+	const completionLabel =
+		certificateKind === "workshop"
+			? "workshop"
+			: certificateKind === "course"
+				? "course"
+				: "program";
 
 	await getResend().emails.send({
 		from: process.env.EMAIL_FROM || "certificates@talentease.com",
@@ -44,7 +52,7 @@ export async function sendCertificateEmail(
         </div>
         <div style="padding: 32px 24px;">
           <p style="color: #333; font-size: 16px; line-height: 1.6;">
-            You have successfully completed the <strong>${workshopTitle}</strong> workshop on <strong>${workshopDate}</strong>.
+            You have successfully completed the <strong>${workshopTitle}</strong> ${completionLabel} on <strong>${workshopDate}</strong>.
           </p>
           <p style="color: #333; font-size: 16px; line-height: 1.6;">
             Your certificate of completion is attached to this email as an image. You can also verify your certificate anytime using the QR code printed on it, or by visiting:

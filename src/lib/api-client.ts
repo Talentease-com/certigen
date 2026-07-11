@@ -1,10 +1,20 @@
+export class ApiError extends Error {
+	constructor(
+		message: string,
+		public readonly status: number,
+	) {
+		super(message);
+		this.name = "ApiError";
+	}
+}
+
 async function parseResponse<T>(res: Response): Promise<T> {
 	const data = await res.json().catch(() => null);
 	if (!res.ok) {
 		const message =
 			(data && typeof data === "object" && "error" in data && String(data.error)) ||
 			`Request failed with status ${res.status}`;
-		throw new Error(message);
+		throw new ApiError(message, res.status);
 	}
 	return data as T;
 }

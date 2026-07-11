@@ -15,17 +15,20 @@ export async function GET(
 
 	if (!cert) return NextResponse.json({ cert: null });
 
-	const workshop = await db.query.workshops.findFirst({
-		where: eq(workshops.id, cert.workshopId),
-	});
+	const workshop = cert.workshopId
+		? await db.query.workshops.findFirst({
+				where: eq(workshops.id, cert.workshopId),
+			})
+		: null;
 
 	return NextResponse.json({
 		cert: {
 			id: cert.id,
 			name: cert.name,
 			email: cert.email,
-			workshopTitle: workshop?.title ?? "Unknown Workshop",
-			workshopDate: workshop?.date ?? "",
+			workshopTitle:
+				cert.certificateTitle ?? workshop?.title ?? "Unknown Certificate",
+			workshopDate: cert.certificateDate ?? workshop?.date ?? "",
 			issuedAt: cert.issuedAt.toISOString(),
 		},
 	});

@@ -1,19 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useShooAuth } from "@shoojs/react";
 import { useAdminStore } from "#/store/admin-store";
+import { useAuthStore } from "#/store/auth-store";
 import { apiGet } from "#/lib/api-client";
 import { downloadBase64File } from "#/lib/download";
 
 export default function AdminDashboard() {
-	const { identity } = useShooAuth();
+	const token = useAuthStore((state) => state.token);
 	const { stats, certificates, loading, loadDashboard } = useAdminStore();
 	const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (identity?.token) loadDashboard();
-	}, [identity?.token, loadDashboard]);
+		if (token) loadDashboard();
+	}, [token, loadDashboard]);
 
 	const handleDownload = async (certId: string) => {
 		if (downloadingId) return;
@@ -70,7 +70,7 @@ export default function AdminDashboard() {
 								<tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
 									<th className="px-6 py-3 text-left font-semibold">Name</th>
 									<th className="px-6 py-3 text-left font-semibold">Email</th>
-									<th className="px-6 py-3 text-left font-semibold">Workshop</th>
+									<th className="px-6 py-3 text-left font-semibold">Certificate</th>
 									<th className="px-6 py-3 text-left font-semibold">Issued</th>
 									<th className="px-6 py-3 text-left font-semibold">Actions</th>
 								</tr>
