@@ -3,7 +3,7 @@ import { db } from "#/db";
 import { certificates, templates } from "#/db/schema";
 import { generateCertId } from "#/server/services/certificate-gen";
 import {
-	renderCertificateById,
+	renderCertificate,
 	type RenderedCertificate,
 } from "#/server/services/certificate-render";
 import { sendCertificateEmail } from "#/server/services/email";
@@ -104,7 +104,7 @@ async function loadTemplateByName(name: string) {
 /**
  * Emails a rendered certificate and tracks delivery status on the row
  * either way. The image is never persisted — rendered on demand by the
- * caller via renderCertificateById.
+ * caller via renderCertificate.
  */
 async function sendAndTrackEmail(
 	certId: string,
@@ -158,7 +158,9 @@ export async function createServiceCertificate(
 			return toResponse(existing.id, "sent");
 		}
 
-		const rendered = await renderCertificateById(existing.id);
+		// template is already loaded above; service certs never have a
+		// workshop, so render directly instead of re-fetching everything.
+		const rendered = await renderCertificate(existing, null, template);
 		if (!rendered) {
 			throw new Error("Failed to render certificate image.");
 		}
@@ -168,20 +170,23 @@ export async function createServiceCertificate(
 
 	const certId = generateCertId();
 
-	await db.insert(certificates).values({
-		id: certId,
-		templateId: template.id,
-		sourcePlatform: input.source.platform,
-		externalId: sourceExternalId(input.source),
-		idempotencyKey: input.source.idempotencyKey,
-		certificateTitle: input.certificate.title,
-		certificateDate: input.certificate.date,
-		name: input.recipient.name,
-		email,
-		emailStatus: "pending",
-	});
+	const [certRow] = await db
+		.insert(certificates)
+		.values({
+			id: certId,
+			templateId: template.id,
+			sourcePlatform: input.source.platform,
+			externalId: sourceExternalId(input.source),
+			idempotencyKey: input.source.idempotencyKey,
+			certificateTitle: input.certificate.title,
+			certificateDate: input.certificate.date,
+			name: input.recipient.name,
+			email,
+			emailStatus: "pending",
+		})
+		.returning();
 
-	const rendered = await renderCertificateById(certId);
+	const rendered = await renderCertificate(certRow, null, template);
 	if (!rendered) {
 		throw new Error("Failed to render certificate image.");
 	}
