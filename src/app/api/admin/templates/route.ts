@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import sharp from "sharp";
 import { z } from "zod";
 import { desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -37,8 +38,6 @@ const uploadTemplateInput = z.object({
 	name: z.string().min(1),
 	imageData: z.string(), // Base64
 	imageExt: z.string().default(".png"),
-	width: z.number().default(3508),
-	height: z.number().default(2480),
 });
 
 export async function POST(request: Request) {
@@ -51,23 +50,35 @@ export async function POST(request: Request) {
 
 		const id = nanoid(12);
 		const buffer = Buffer.from(data.imageData, "base64");
+
+		// The canvas must match the image's *actual* pixel size — assuming a
+		// fixed size (e.g. A4 at 300dpi) regardless of what was uploaded is
+		// what causes "Image to composite must have same dimensions or
+		// smaller" the moment someone uploads anything else.
+		const metadata = await sharp(buffer).metadata();
+		const width = metadata.width;
+		const height = metadata.height;
+		if (!width || !height) {
+			throw new Error("Could not read the uploaded image's dimensions.");
+		}
+
 		const filePath = await saveTemplate(id, buffer, data.imageExt);
 
 		// Give every new template a sensible starting layout (name / workshop
 		// title / date / QR) so it's immediately usable; the admin can then
 		// open the canvas editor to reposition things or add logos.
-		const design = defaultDesign(data.width, data.height);
+		const design = defaultDesign(width, height);
 
 		await db.insert(templates).values({
 			id,
 			name: data.name,
 			filePath,
 			design: serializeCertificateDesign(design),
-			width: data.width,
-			height: data.height,
+			width,
+			height,
 		});
 
-		return NextResponse.json({ id, name: data.name });
+		return NextResponse.json({ id, name: data.name, width, height });
 	} catch (err) {
 		return errorResponse(err);
 	}

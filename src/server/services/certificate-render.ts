@@ -44,6 +44,8 @@ export async function renderCertificate(
 
 	const { pngBuffer } = await generateCertificateImage({
 		templateBuffer,
+		templateWidth: template.width,
+		templateHeight: template.height,
 		elements: design.elements,
 		values: {
 			name: cert.name,

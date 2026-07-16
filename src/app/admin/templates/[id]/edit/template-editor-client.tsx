@@ -15,6 +15,7 @@ import {
 } from "#/lib/certificate-design";
 import { ElementNode } from "./element-nodes";
 import { ElementProperties } from "./element-properties";
+import { EditorGuide } from "./editor-guide";
 
 const DISPLAY_WIDTH = 860;
 
@@ -136,6 +137,8 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 				</div>
 			)}
 
+			<EditorGuide />
+
 			<div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 items-start">
 				<div>
 					<div className="flex items-center gap-2 mb-3">
@@ -192,6 +195,8 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 										<ElementNode
 											key={el.id}
 											element={el}
+											canvasWidth={template.width}
+											canvasHeight={template.height}
 											assetUrl={el.type === "image" ? assetUrls[el.storageKey] : undefined}
 											registerRef={(node) => {
 												if (node) nodeRefs.current.set(el.id, node);
@@ -217,12 +222,20 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 
 				<div className="glass-card rounded-xl p-4">
 					{!selected ? (
-						<p className="text-sm text-gray-400">
-							Select an element to edit its properties, or add a new one above.
-						</p>
+						<div className="text-center py-6">
+							<div className="text-3xl mb-2">👆</div>
+							<p className="text-sm font-medium text-gray-700 mb-1">
+								Nothing selected
+							</p>
+							<p className="text-xs text-gray-400">
+								Click any element on the canvas to edit its font, size, color,
+								and layering — or add a new one using the toolbar above.
+							</p>
+						</div>
 					) : (
 						<ElementProperties
 							element={selected}
+							maxFontSize={Math.max(24, Math.floor(template.height / 2))}
 							onChange={(patch) => updateElement(selected.id, patch)}
 							onDelete={() => removeElement(selected.id)}
 							onBringForward={() => bringForward(selected.id)}

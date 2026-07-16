@@ -73,8 +73,6 @@ interface AdminState {
 		name: string;
 		imageData: string;
 		imageExt: string;
-		width: number;
-		height: number;
 	}) => Promise<void>;
 	/** Soft-deletes: marks the template inactive, never removes the row. */
 	deleteTemplate: (id: string) => Promise<void>;

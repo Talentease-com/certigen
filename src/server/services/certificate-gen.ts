@@ -63,10 +63,19 @@ async function getFont(fontFamily: string): Promise<any | null> {
  * (width × a height derived from font size), with the value aligned inside
  * that box. The result is composited at (el.x, el.y) — the box IS the
  * element, so what the editor shows is what gets drawn.
+ *
+ * `width` and `maxHeight` are the already-clamped-to-canvas dimensions (see
+ * clampToCanvas) — a large fontSize can otherwise make the SVG taller than
+ * the template itself, which sharp refuses to composite.
  */
-async function buildTextSvg(el: TextElement, value: string): Promise<Buffer> {
-	const { width, fontSize, fontFamily, color, align, opacity } = el;
-	const svgHeight = Math.ceil(fontSize * 1.6);
+async function buildTextSvg(
+	el: TextElement,
+	value: string,
+	width: number,
+	maxHeight: number,
+): Promise<Buffer> {
+	const { fontSize, fontFamily, color, align, opacity } = el;
+	const svgHeight = Math.max(1, Math.min(Math.ceil(fontSize * 1.6), maxHeight));
 
 	const font = await getFont(fontFamily);
 
@@ -152,8 +161,34 @@ async function applyOpacity(buffer: Buffer, opacity: number): Promise<Buffer> {
 		.toBuffer();
 }
 
+/**
+ * Clamps an element's box to fit inside the template canvas. Elements are
+ * meant to stay within bounds (the editor's drag/resize already constrains
+ * this), but this is the last line of defense: a template saved before that
+ * guard existed, a manually-edited row, or simple float rounding must never
+ * be able to crash generation — sharp refuses to composite an overlay that's
+ * larger than the base image, so an unclamped element is a hard 500 for a
+ * real person trying to get their certificate.
+ */
+function clampToCanvas(
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+	canvasWidth: number,
+	canvasHeight: number,
+) {
+	const left = Math.min(Math.max(0, Math.round(x)), Math.max(0, canvasWidth - 1));
+	const top = Math.min(Math.max(0, Math.round(y)), Math.max(0, canvasHeight - 1));
+	const clampedWidth = Math.max(1, Math.min(Math.round(width), canvasWidth - left));
+	const clampedHeight = Math.max(1, Math.min(Math.round(height), canvasHeight - top));
+	return { left, top, width: clampedWidth, height: clampedHeight };
+}
+
 interface GenerateCertificateOptions {
 	templateBuffer: Buffer;
+	templateWidth: number;
+	templateHeight: number;
 	elements: CertificateElement[];
 	values: Record<string, string>;
 	verifyUrl: string;
@@ -164,7 +199,15 @@ interface GenerateCertificateOptions {
 export async function generateCertificateImage(
 	opts: GenerateCertificateOptions,
 ): Promise<{ pngBuffer: Buffer }> {
-	const { templateBuffer, elements, values, verifyUrl, resolveAsset } = opts;
+	const {
+		templateBuffer,
+		templateWidth,
+		templateHeight,
+		elements,
+		values,
+		verifyUrl,
+		resolveAsset,
+	} = opts;
 
 	const composites: OverlayOptions[] = [];
 
@@ -172,18 +215,24 @@ export async function generateCertificateImage(
 	const ordered = [...elements].sort((a, b) => a.zIndex - b.zIndex);
 
 	for (const el of ordered) {
-		const left = Math.round(el.x);
-		const top = Math.round(el.y);
+		const { left, top, width, height } = clampToCanvas(
+			el.x,
+			el.y,
+			el.width,
+			el.height,
+			templateWidth,
+			templateHeight,
+		);
 
 		if (el.type === "text") {
 			const value = el.boundTo ? values[el.boundTo] : el.content;
 			if (!value) continue;
-			const svgBuffer = await buildTextSvg(el, value);
+			const svgBuffer = await buildTextSvg(el, value, width, height);
 			composites.push({ input: svgBuffer, top, left });
 		} else if (el.type === "image") {
 			const raw = await resolveAsset(el.storageKey);
 			const resized = await sharp(raw)
-				.resize(Math.round(el.width), Math.round(el.height), { fit: "fill" })
+				.resize(width, height, { fit: "fill" })
 				.ensureAlpha()
 				.png()
 				.toBuffer();
@@ -193,8 +242,10 @@ export async function generateCertificateImage(
 				left,
 			});
 		} else if (el.type === "qr") {
+			// Keep QR codes square even when the box got clamped unevenly.
+			const size = Math.min(width, height);
 			const qrBuffer = await QRCode.toBuffer(verifyUrl, {
-				width: Math.round(el.width),
+				width: size,
 				margin: 1,
 				color: { dark: "#333333", light: "#ffffff" },
 				errorCorrectionLevel: "H",

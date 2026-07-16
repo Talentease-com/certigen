@@ -58,8 +58,6 @@ export default function TemplatesPage() {
 				name: templateName,
 				imageData: fileBase64,
 				imageExt: ext || ".png",
-				width: 3508,
-				height: 2480,
 			});
 			setTemplateName("");
 			setSelectedFile(null);
@@ -144,7 +142,8 @@ export default function TemplatesPage() {
 				>
 					<h3 className="font-semibold text-gray-900 mb-4">Upload New Template</h3>
 					<p className="text-xs text-gray-500 mb-4">
-						Just the background image for now — once it&apos;s uploaded, open the design
+						Just the background image for now — any size or aspect ratio works, the
+						canvas will match it exactly. Once it&apos;s uploaded, open the design
 						editor to place text, add logos, and fine-tune everything.
 					</p>
 					<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -163,7 +162,7 @@ export default function TemplatesPage() {
 						</div>
 						<div>
 							<label className="block text-sm font-medium text-gray-700 mb-1">
-								Template Image (A4 Landscape: 3508×2480px)
+								Template Image
 							</label>
 							<input
 								ref={fileInputRef}

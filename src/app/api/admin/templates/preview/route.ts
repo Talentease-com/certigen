@@ -11,9 +11,7 @@ import { errorResponse, requireAdminFromRequest, zodErrorResponse } from "#/serv
 export const runtime = "nodejs";
 
 const testPreviewInput = z.object({
-	templateId: z.string().optional(),
-	imageData: z.string().optional(),
-	imageExt: z.string().optional(),
+	templateId: z.string(),
 	elements: z.array(certificateElementSchema),
 });
 
@@ -25,22 +23,16 @@ export async function POST(request: Request) {
 		if (!parsed.success) return zodErrorResponse(parsed.error);
 		const data = parsed.data;
 
-		let templateBuffer: Buffer;
-
-		if (data.imageData) {
-			templateBuffer = Buffer.from(data.imageData, "base64");
-		} else if (data.templateId) {
-			const template = await db.query.templates.findFirst({
-				where: eq(templates.id, data.templateId),
-			});
-			if (!template) throw new Error("Template not found");
-			templateBuffer = await readFile(template.filePath);
-		} else {
-			throw new Error("Provide either templateId or imageData");
-		}
+		const template = await db.query.templates.findFirst({
+			where: eq(templates.id, data.templateId),
+		});
+		if (!template) throw new Error("Template not found");
+		const templateBuffer = await readFile(template.filePath);
 
 		const { pngBuffer } = await generateCertificateImage({
 			templateBuffer,
+			templateWidth: template.width,
+			templateHeight: template.height,
 			elements: data.elements,
 			values: {
 				name: "Jane Doe",

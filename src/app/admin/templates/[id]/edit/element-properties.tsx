@@ -5,12 +5,15 @@ import { DYNAMIC_FIELD_LABELS, type CertificateElement } from "#/lib/certificate
 
 export function ElementProperties({
 	element,
+	maxFontSize,
 	onChange,
 	onDelete,
 	onBringForward,
 	onSendBackward,
 }: {
 	element: CertificateElement;
+	/** Keeps the font-size input from producing text taller than the canvas. */
+	maxFontSize: number;
 	onChange: (patch: Partial<CertificateElement>) => void;
 	onDelete: () => void;
 	onBringForward: () => void;
@@ -89,14 +92,20 @@ export function ElementProperties({
 
 					<div>
 						<label className="block text-[11px] font-medium text-gray-500 mb-1">
-							Font Size (px)
+							Font Size (px, max {maxFontSize})
 						</label>
 						<input
 							type="number"
+							min={8}
+							max={maxFontSize}
 							value={element.fontSize}
-							onChange={(e) =>
-								onChange({ fontSize: parseInt(e.target.value, 10) || 24 })
-							}
+							onChange={(e) => {
+								const parsed = parseInt(e.target.value, 10);
+								const clamped = Number.isNaN(parsed)
+									? element.fontSize
+									: Math.min(Math.max(8, parsed), maxFontSize);
+								onChange({ fontSize: clamped });
+							}}
 							className="input-field text-sm"
 						/>
 					</div>

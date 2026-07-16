@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import sharp from "sharp";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "#/db";
@@ -67,6 +68,16 @@ export async function PATCH(
 		if (data.imageData) {
 			const buffer = Buffer.from(data.imageData, "base64");
 			const ext = data.imageExt || ".png";
+
+			// Re-measure — a replacement image is very unlikely to share the
+			// old image's exact pixel size, and a stale width/height is what
+			// causes "must have same dimensions or smaller" at render time.
+			const metadata = await sharp(buffer).metadata();
+			if (!metadata.width || !metadata.height) {
+				throw new Error("Could not read the uploaded image's dimensions.");
+			}
+			updates.width = metadata.width;
+			updates.height = metadata.height;
 			updates.filePath = await saveTemplate(id, buffer, ext);
 		}
 

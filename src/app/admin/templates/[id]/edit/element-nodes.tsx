@@ -9,21 +9,42 @@ import type { CertificateElement } from "#/lib/certificate-design";
 
 interface NodeProps<T extends CertificateElement> {
 	element: T;
+	canvasWidth: number;
+	canvasHeight: number;
 	registerRef: (node: Konva.Node | null) => void;
 	onSelect: () => void;
 	onChange: (patch: Partial<CertificateElement>) => void;
 }
 
+const MIN_SIZE = 20;
+
+/**
+ * Keeps an element fully on the canvas — dragging or resizing past an edge
+ * clamps back to the boundary instead of letting the box hang off it. This
+ * isn't just tidiness: an element positioned or sized outside the template
+ * bounds renders as an overlay larger than the base image, which the server
+ * (sharp) refuses to composite at all. Clamping here means that error can
+ * never happen from normal editor use.
+ */
 function useCommonHandlers<T extends CertificateElement>({
 	onSelect,
 	onChange,
-}: Pick<NodeProps<T>, "onSelect" | "onChange">) {
+	canvasWidth,
+	canvasHeight,
+}: Pick<NodeProps<T>, "onSelect" | "onChange" | "canvasWidth" | "canvasHeight">) {
 	return {
 		draggable: true,
 		onClick: onSelect,
 		onTap: onSelect,
 		onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
-			onChange({ x: e.target.x(), y: e.target.y() });
+			const node = e.target;
+			const width = node.width();
+			const height = node.height();
+			const x = Math.min(Math.max(0, node.x()), Math.max(0, canvasWidth - width));
+			const y = Math.min(Math.max(0, node.y()), Math.max(0, canvasHeight - height));
+			node.x(x);
+			node.y(y);
+			onChange({ x, y });
 		},
 		onTransformEnd: (e: Konva.KonvaEventObject<Event>) => {
 			const node = e.target;
@@ -31,23 +52,36 @@ function useCommonHandlers<T extends CertificateElement>({
 			const scaleY = node.scaleY();
 			node.scaleX(1);
 			node.scaleY(1);
-			onChange({
-				x: node.x(),
-				y: node.y(),
-				width: Math.max(20, node.width() * scaleX),
-				height: Math.max(20, node.height() * scaleY),
-			});
+
+			const x = Math.min(Math.max(0, node.x()), Math.max(0, canvasWidth - MIN_SIZE));
+			const y = Math.min(Math.max(0, node.y()), Math.max(0, canvasHeight - MIN_SIZE));
+			const width = Math.min(
+				Math.max(MIN_SIZE, node.width() * scaleX),
+				Math.max(MIN_SIZE, canvasWidth - x),
+			);
+			const height = Math.min(
+				Math.max(MIN_SIZE, node.height() * scaleY),
+				Math.max(MIN_SIZE, canvasHeight - y),
+			);
+
+			node.x(x);
+			node.y(y);
+			node.width(width);
+			node.height(height);
+			onChange({ x, y, width, height });
 		},
 	};
 }
 
 export function TextNode({
 	element,
+	canvasWidth,
+	canvasHeight,
 	registerRef,
 	onSelect,
 	onChange,
 }: NodeProps<Extract<CertificateElement, { type: "text" }>>) {
-	const handlers = useCommonHandlers({ onSelect, onChange });
+	const handlers = useCommonHandlers({ onSelect, onChange, canvasWidth, canvasHeight });
 
 	return (
 		<KonvaText
@@ -71,12 +105,14 @@ export function TextNode({
 export function ImageNode({
 	element,
 	assetUrl,
+	canvasWidth,
+	canvasHeight,
 	registerRef,
 	onSelect,
 	onChange,
 }: NodeProps<Extract<CertificateElement, { type: "image" }>> & { assetUrl?: string }) {
 	const [img] = useImage(assetUrl ?? "");
-	const handlers = useCommonHandlers({ onSelect, onChange });
+	const handlers = useCommonHandlers({ onSelect, onChange, canvasWidth, canvasHeight });
 
 	if (!img) return null;
 
@@ -107,6 +143,8 @@ function getSampleQrDataUrl(): Promise<string> {
 
 export function QrNode({
 	element,
+	canvasWidth,
+	canvasHeight,
 	registerRef,
 	onSelect,
 	onChange,
@@ -116,7 +154,7 @@ export function QrNode({
 		getSampleQrDataUrl().then(setDataUrl);
 	}, []);
 	const [img] = useImage(dataUrl ?? "");
-	const handlers = useCommonHandlers({ onSelect, onChange });
+	const handlers = useCommonHandlers({ onSelect, onChange, canvasWidth, canvasHeight });
 
 	if (!img) return null;
 
