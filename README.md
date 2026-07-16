@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Certigen
 
-## Getting Started
+Certificate generation and verification platform for Talentease certificates.
 
-First, run the development server:
+## Setup
+
+1. Install dependencies.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Create local environment configuration.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cp .env.example .env.local
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Configure at least:
 
-## Learn More
+```env
+DATABASE_URL=postgresql://postgres:YOUR_POSTGRES_PASSWORD@localhost:5432/certigen
+BASE_URL=http://localhost:3000
+APP_ORIGIN=http://localhost:3000
+ADMIN_USER_IDS=
+RESEND_API_KEY=
+CERTIGEN_SERVICE_API_KEY=
+```
 
-To learn more about Next.js, take a look at the following resources:
+`APP_ORIGIN` must exactly match the origin used in the browser, including protocol and port. Shoo
+issues a different pairwise user ID for each origin. After signing in on a new origin, copy the
+logged `ps_...` ID into the comma-separated `ADMIN_USER_IDS` value and restart Certigen. Changing
+the origin requires registering the new ID.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+4. Run the app.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+pnpm dev
+```
 
-## Deploy on Vercel
+## Elevate LMS Integration
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Certigen exposes a server-to-server REST endpoint for Elevate LMS:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```http
+POST /api/service/certificates
+Authorization: Bearer <CERTIGEN_SERVICE_API_KEY>
+Content-Type: application/json
+```
+
+The request references an existing Certigen template by exact `templateName`. The endpoint does not
+create a workshop. It stores the Elevate course certificate with source metadata and uses the course
+title/date in the existing `workshop_title` and `date` template placeholders.
+
+Service certificate requests are idempotent by `source.platform + source.idempotencyKey`. Repeating
+the same request returns the existing certificate; reusing the key with different certificate data
+returns `409`.
+
+Apply `drizzle/0000_service_certificates.sql` before enabling the integration in an environment with
+an existing database.

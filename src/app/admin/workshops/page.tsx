@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useShooAuth } from "@shoojs/react";
 import { useAdminStore, type Workshop } from "#/store/admin-store";
+import { useAuthStore } from "#/store/auth-store";
 
 export default function WorkshopsPage() {
-	const { identity } = useShooAuth();
+	const token = useAuthStore((state) => state.token);
 	const {
 		workshops: workshopsList,
 		templates: templatesList,
@@ -31,8 +31,8 @@ export default function WorkshopsPage() {
 	);
 
 	useEffect(() => {
-		if (identity?.token) loadWorkshops();
-	}, [identity?.token, loadWorkshops]);
+		if (token) loadWorkshops();
+	}, [token, loadWorkshops]);
 
 	const handleCreate = async (e: React.FormEvent) => {
 		e.preventDefault();

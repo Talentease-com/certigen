@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useShooAuth } from "@shoojs/react";
-import { useAdminStore, type Template } from "#/store/admin-store";
 import { apiSend } from "#/lib/api-client";
+import { useAdminStore, type Template } from "#/store/admin-store";
+import { useAuthStore } from "#/store/auth-store";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
 
 export default function TemplatesPage() {
-	const { identity } = useShooAuth();
+	const token = useAuthStore((state) => state.token);
 	const {
 		templates: templatesList,
 		loading,
@@ -31,8 +31,8 @@ export default function TemplatesPage() {
 	const [previewError, setPreviewError] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (identity?.token) loadTemplates();
-	}, [identity?.token, loadTemplates]);
+		if (token) loadTemplates();
+	}, [token, loadTemplates]);
 
 	const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
 		const file = e.target.files?.[0] || null;
@@ -106,7 +106,7 @@ export default function TemplatesPage() {
 				"/api/admin/templates/preview",
 				"POST",
 				{ templateId: t.id, elements: design.elements },
-				identity?.token,
+				token ?? undefined,
 			);
 			setPreviewImage(res.base64);
 		} catch (err) {
