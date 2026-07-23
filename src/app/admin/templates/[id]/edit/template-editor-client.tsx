@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useShooAuth } from "@shoojs/react";
 import { Stage, Layer, Image as KonvaImage, Transformer } from "react-konva";
@@ -16,8 +16,9 @@ import {
 import { ElementNode } from "./element-nodes";
 import { ElementProperties } from "./element-properties";
 import { EditorGuide } from "./editor-guide";
+import { TemplateMetaPanel } from "./template-meta-panel";
 
-const DISPLAY_WIDTH = 860;
+const MAX_DISPLAY_WIDTH = 860;
 
 // Konva touches `document`/canvas at render time, so the Stage must not
 // render during SSR. useSyncExternalStore gives a stable false on the
@@ -29,6 +30,27 @@ function useIsClient() {
 		() => true,
 		() => false,
 	);
+}
+
+/** Tracks the canvas wrapper's actual available width so the Stage scales
+ * down on narrower viewports/sidebars instead of overflowing at a fixed
+ * 860px. */
+function useContainerWidth() {
+	const ref = useRef<HTMLDivElement>(null);
+	const [width, setWidth] = useState(MAX_DISPLAY_WIDTH);
+
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const observer = new ResizeObserver((entries) => {
+			const measured = entries[0]?.contentRect.width;
+			if (measured) setWidth(measured);
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+
+	return [ref, width] as const;
 }
 
 export function TemplateEditorClient({ templateId }: { templateId: string }) {
@@ -63,11 +85,16 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 	const imageInputRef = useRef<HTMLInputElement>(null);
 	const transformerRef = useRef<Konva.Transformer>(null);
 	const nodeRefs = useRef<Map<string, Konva.Node>>(new Map());
+	const [containerRef, containerWidth] = useContainerWidth();
 
 	const [bgImage] = useImage(backgroundUrl ?? "");
 
-	useEffect(() => {
+	const loadTemplate = () => {
 		if (identity?.token) load(templateId, identity.token);
+	};
+
+	useEffect(() => {
+		loadTemplate();
 		return () => reset();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [templateId, identity?.token]);
@@ -86,7 +113,7 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 		if (imageInputRef.current) imageInputRef.current.value = "";
 	};
 
-	if (loading || !template) {
+	if (loading) {
 		return (
 			<div className="flex items-center justify-center py-20">
 				<div className="w-6 h-6 border-2 border-te-orange/30 border-t-te-orange rounded-full animate-spin" />
@@ -94,7 +121,27 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 		);
 	}
 
-	const scale = DISPLAY_WIDTH / template.width;
+	if (!template) {
+		return (
+			<div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
+				<div className="text-3xl">⚠️</div>
+				<p className="text-sm text-red-600 max-w-sm">
+					{error ?? "Couldn't load this template."}
+				</p>
+				<div className="flex gap-3">
+					<button type="button" className="btn-secondary text-sm" onClick={loadTemplate}>
+						Retry
+					</button>
+					<Link href="/admin/templates" className="btn-primary text-sm">
+						← Back to Templates
+					</Link>
+				</div>
+			</div>
+		);
+	}
+
+	const displayWidth = Math.min(containerWidth || MAX_DISPLAY_WIDTH, MAX_DISPLAY_WIDTH);
+	const scale = displayWidth / template.width;
 	const displayHeight = Math.round(template.height * scale);
 	const selected = elements.find((el) => el.id === selectedId) ?? null;
 	const sortedElements = [...elements].sort((a, b) => a.zIndex - b.zIndex);
@@ -137,6 +184,8 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 				</div>
 			)}
 
+			<TemplateMetaPanel template={template} token={identity?.token} onSaved={loadTemplate} />
+
 			<EditorGuide />
 
 			<div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 items-start">
@@ -171,10 +220,13 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 						</label>
 					</div>
 
-					<div className="bg-gray-100 rounded-xl border border-gray-200 overflow-hidden inline-block">
+					<div
+						ref={containerRef}
+						className="w-full bg-gray-100 rounded-xl border border-gray-200 overflow-hidden flex justify-center"
+					>
 						{mounted && (
 							<Stage
-								width={DISPLAY_WIDTH}
+								width={displayWidth}
 								height={displayHeight}
 								scaleX={scale}
 								scaleY={scale}
@@ -210,6 +262,12 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 										ref={transformerRef}
 										rotateEnabled={false}
 										flipEnabled={false}
+										keepRatio={selected?.type === "qr"}
+										enabledAnchors={
+											selected?.type === "qr"
+												? ["top-left", "top-right", "bottom-left", "bottom-right"]
+												: undefined
+										}
 										boundBoxFunc={(oldBox, newBox) =>
 											newBox.width < 20 || newBox.height < 20 ? oldBox : newBox
 										}

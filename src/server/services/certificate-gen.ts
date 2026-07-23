@@ -148,11 +148,18 @@ async function buildTextSvg(
 	);
 }
 
-/** Scales down an overlay's alpha channel by `opacity` before compositing. */
+/**
+ * Scales down an overlay's alpha channel by `opacity` before compositing.
+ * The mask SVG must declare the *same* pixel dimensions as `buffer` — an
+ * SVG with no width/height/viewBox rasterizes at librsvg's default 300×150,
+ * which sharp then refuses to composite onto anything smaller (or silently
+ * only masks part of anything larger).
+ */
 async function applyOpacity(buffer: Buffer, opacity: number): Promise<Buffer> {
 	if (opacity >= 1) return buffer;
+	const { width, height } = await sharp(buffer).metadata();
 	const mask = Buffer.from(
-		`<svg><rect width="100%" height="100%" fill="black" fill-opacity="${opacity}"/></svg>`,
+		`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="black" fill-opacity="${opacity}"/></svg>`,
 	);
 	return sharp(buffer)
 		.ensureAlpha()

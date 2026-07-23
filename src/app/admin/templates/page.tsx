@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { apiSend } from "#/lib/api-client";
+import { parseCertificateDesign } from "#/lib/certificate-design";
 import { useAdminStore, type Template } from "#/store/admin-store";
 import { useAuthStore } from "#/store/auth-store";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
@@ -99,7 +100,7 @@ export default function TemplatesPage() {
 		setPreviewError(null);
 		setPreviewingId(t.id);
 		try {
-			const design = JSON.parse(t.design);
+			const design = parseCertificateDesign(t.design);
 			const res = await apiSend<{ base64: string }>(
 				"/api/admin/templates/preview",
 				"POST",
@@ -217,7 +218,7 @@ export default function TemplatesPage() {
 								<p>
 									{t.width}×{t.height}px
 								</p>
-								<p>{JSON.parse(t.design).elements.length} element(s)</p>
+								<p>{parseCertificateDesign(t.design).elements.length} element(s)</p>
 								<p>{new Date(t.createdAt).toLocaleDateString()}</p>
 							</div>
 							<div className="flex items-center gap-3 pt-3 border-t border-gray-100">

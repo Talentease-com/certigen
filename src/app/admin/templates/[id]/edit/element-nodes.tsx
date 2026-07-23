@@ -31,7 +31,13 @@ function useCommonHandlers<T extends CertificateElement>({
 	onChange,
 	canvasWidth,
 	canvasHeight,
-}: Pick<NodeProps<T>, "onSelect" | "onChange" | "canvasWidth" | "canvasHeight">) {
+	lockSquare = false,
+}: Pick<NodeProps<T>, "onSelect" | "onChange" | "canvasWidth" | "canvasHeight"> & {
+	/** QR elements always render as a square (min side, top-left anchored) — see
+	 * generateCertificateImage. Locking it here keeps the editor honest about
+	 * what a non-square drag would actually produce. */
+	lockSquare?: boolean;
+}) {
 	return {
 		draggable: true,
 		onClick: onSelect,
@@ -55,14 +61,20 @@ function useCommonHandlers<T extends CertificateElement>({
 
 			const x = Math.min(Math.max(0, node.x()), Math.max(0, canvasWidth - MIN_SIZE));
 			const y = Math.min(Math.max(0, node.y()), Math.max(0, canvasHeight - MIN_SIZE));
-			const width = Math.min(
+			let width = Math.min(
 				Math.max(MIN_SIZE, node.width() * scaleX),
 				Math.max(MIN_SIZE, canvasWidth - x),
 			);
-			const height = Math.min(
+			let height = Math.min(
 				Math.max(MIN_SIZE, node.height() * scaleY),
 				Math.max(MIN_SIZE, canvasHeight - y),
 			);
+
+			if (lockSquare) {
+				const side = Math.min(width, height);
+				width = side;
+				height = side;
+			}
 
 			node.x(x);
 			node.y(y);
@@ -154,7 +166,13 @@ export function QrNode({
 		getSampleQrDataUrl().then(setDataUrl);
 	}, []);
 	const [img] = useImage(dataUrl ?? "");
-	const handlers = useCommonHandlers({ onSelect, onChange, canvasWidth, canvasHeight });
+	const handlers = useCommonHandlers({
+		onSelect,
+		onChange,
+		canvasWidth,
+		canvasHeight,
+		lockSquare: true,
+	});
 
 	if (!img) return null;
 
