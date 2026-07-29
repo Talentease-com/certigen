@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { apiSend } from "#/lib/api-client";
 
 /**
  * Renaming a template and replacing its background image were both
@@ -11,48 +10,33 @@ import { apiSend } from "#/lib/api-client";
  */
 export function TemplateMetaPanel({
 	template,
-	token,
-	onSaved,
+	saving,
+	onSave,
 }: {
 	template: { id: string; name: string };
-	token?: string;
-	onSaved: () => void;
+	saving: boolean;
+	onSave: (data: { name: string; file: File | null }) => Promise<boolean>;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [name, setName] = useState(template.name);
 	const [file, setFile] = useState<File | null>(null);
-	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	const handleSave = async (e: React.FormEvent) => {
 		e.preventDefault();
-		setSaving(true);
 		setError(null);
 		try {
-			const payload: Record<string, unknown> = {};
-			if (name.trim() && name !== template.name) payload.name = name.trim();
-			if (file) {
-				const buffer = await file.arrayBuffer();
-				const base64 = btoa(
-					new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ""),
-				);
-				payload.imageData = base64;
-				payload.imageExt = file.name.substring(file.name.lastIndexOf(".")) || ".png";
-			}
-
-			if (Object.keys(payload).length === 0) {
+			if (name.trim() === template.name && !file) {
 				setExpanded(false);
 				return;
 			}
 
-			await apiSend(`/api/admin/templates/${template.id}`, "PATCH", payload, token);
-			setFile(null);
-			setExpanded(false);
-			onSaved();
+			if (await onSave({ name, file })) {
+				setFile(null);
+				setExpanded(false);
+			}
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to update template");
-		} finally {
-			setSaving(false);
 		}
 	};
 
@@ -77,6 +61,7 @@ export function TemplateMetaPanel({
 				<button
 					type="button"
 					onClick={() => setExpanded(false)}
+					disabled={saving}
 					className="text-xs text-gray-400 hover:text-gray-600"
 				>
 					Cancel
@@ -93,6 +78,7 @@ export function TemplateMetaPanel({
 					type="text"
 					value={name}
 					onChange={(e) => setName(e.target.value)}
+					disabled={saving}
 					className="input-field text-sm"
 					required
 				/>
@@ -106,11 +92,12 @@ export function TemplateMetaPanel({
 					type="file"
 					accept="image/*"
 					onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+					disabled={saving}
 					className="input-field text-sm"
 				/>
 				<p className="text-[11px] text-gray-400 mt-1">
-					The canvas will resize to match the new image exactly — existing
-					elements may need repositioning afterward if the size changes a lot.
+					The canvas will resize to match the new image and scale existing
+					elements to preserve their placement.
 				</p>
 			</div>
 

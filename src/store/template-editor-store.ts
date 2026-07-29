@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { apiGet, apiSend } from "#/lib/api-client";
 import {
+	moveElementLayer,
 	parseCertificateDesign,
 	serializeCertificateDesign,
 	type CertificateElement,
@@ -25,7 +26,9 @@ interface TemplateEditorState {
 	assetUrls: Record<string, string>;
 	loading: boolean;
 	saving: boolean;
+	metadataSaving: boolean;
 	dirty: boolean;
+	revision: number;
 	error: string | null;
 	previewUrl: string | null;
 	previewing: boolean;
@@ -40,6 +43,10 @@ interface TemplateEditorState {
 	bringForward: (id: string) => void;
 	sendBackward: (id: string) => void;
 	save: (token?: string) => Promise<void>;
+	saveMetadata: (
+		data: { name: string; file: File | null },
+		token?: string,
+	) => Promise<boolean>;
 	testGenerate: (token?: string) => Promise<void>;
 	reset: () => void;
 }
@@ -52,7 +59,9 @@ const initial = {
 	assetUrls: {} as Record<string, string>,
 	loading: false,
 	saving: false,
+	metadataSaving: false,
 	dirty: false,
+	revision: 0,
 	error: null as string | null,
 	previewUrl: null as string | null,
 	previewing: false,
@@ -121,55 +130,69 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
 	selectElement: (id) => set({ selectedId: id }),
 
 	addText: () => {
-		const { template, elements } = get();
-		if (!template) return;
+		const { template, metadataSaving } = get();
+		if (!template || metadataSaving) return;
 		const id = nanoid(8);
-		const el: CertificateElement = {
-			id,
-			type: "text",
-			content: "New text",
-			x: template.width / 2 - 200,
-			y: template.height / 2,
-			width: 400,
-			height: 80,
-			rotation: 0,
-			zIndex: nextZIndex(elements),
-			opacity: 1,
-			fontFamily: "Inter",
-			fontSize: 48,
-			color: "#333333",
-			align: "center",
-		};
-		set({ elements: [...elements, el], selectedId: id, dirty: true });
+		set((state) => {
+			const el: CertificateElement = {
+				id,
+				type: "text",
+				content: "New text",
+				x: template.width / 2 - 200,
+				y: template.height / 2,
+				width: 400,
+				height: 80,
+				rotation: 0,
+				zIndex: nextZIndex(state.elements),
+				opacity: 1,
+				fontFamily: "Inter",
+				fontSize: 48,
+				color: "#333333",
+				align: "center",
+			};
+			return {
+				elements: [...state.elements, el],
+				selectedId: id,
+				dirty: true,
+				revision: state.revision + 1,
+			};
+		});
 	},
 
 	addDynamicField: (field) => {
-		const { template, elements } = get();
-		if (!template) return;
+		const { template, metadataSaving } = get();
+		if (!template || metadataSaving) return;
 		const id = nanoid(8);
-		const el: CertificateElement = {
-			id,
-			type: "text",
-			content: "",
-			boundTo: field,
-			x: template.width / 2 - 200,
-			y: template.height / 2,
-			width: 400,
-			height: 80,
-			rotation: 0,
-			zIndex: nextZIndex(elements),
-			opacity: 1,
-			fontFamily: "Inter",
-			fontSize: 48,
-			color: "#333333",
-			align: "center",
-		};
-		set({ elements: [...elements, el], selectedId: id, dirty: true });
+		set((state) => {
+			const el: CertificateElement = {
+				id,
+				type: "text",
+				content: "",
+				boundTo: field,
+				x: template.width / 2 - 200,
+				y: template.height / 2,
+				width: 400,
+				height: 80,
+				rotation: 0,
+				zIndex: nextZIndex(state.elements),
+				opacity: 1,
+				fontFamily: "Inter",
+				fontSize: 48,
+				color: "#333333",
+				align: "center",
+			};
+			return {
+				elements: [...state.elements, el],
+				selectedId: id,
+				dirty: true,
+				revision: state.revision + 1,
+			};
+		});
 	},
 
 	addImageElement: async (file, token) => {
-		const { template, elements } = get();
-		if (!template) return;
+		const { template, metadataSaving } = get();
+		if (!template || metadataSaving) return;
 		try {
 			const buffer = await file.arrayBuffer();
 			const base64 = btoa(
@@ -186,86 +209,92 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
 
 			const id = nanoid(8);
 			const size = 240;
-			const el: CertificateElement = {
-				id,
-				type: "image",
-				storageKey: res.storageKey,
-				x: template.width / 2 - size / 2,
-				y: template.height / 2 - size / 2,
-				width: size,
-				height: size,
-				rotation: 0,
-				zIndex: nextZIndex(elements),
-				opacity: 1,
-			};
-
-			set((state) => ({
-				elements: [...state.elements, el],
-				selectedId: id,
-				dirty: true,
-				assetUrls: { ...state.assetUrls, [res.storageKey]: URL.createObjectURL(file) },
-			}));
+			set((state) => {
+				if (state.metadataSaving || state.template?.id !== template.id) {
+					return state;
+				}
+				const el: CertificateElement = {
+					id,
+					type: "image",
+					storageKey: res.storageKey,
+					x: template.width / 2 - size / 2,
+					y: template.height / 2 - size / 2,
+					width: size,
+					height: size,
+					rotation: 0,
+					zIndex: nextZIndex(state.elements),
+					opacity: 1,
+				};
+				return {
+					elements: [...state.elements, el],
+					selectedId: id,
+					dirty: true,
+					assetUrls: {
+						...state.assetUrls,
+						[res.storageKey]: URL.createObjectURL(file),
+					},
+					revision: state.revision + 1,
+				};
+			});
 		} catch (err) {
 			set({ error: err instanceof Error ? err.message : "Failed to add image" });
 		}
 	},
 
 	updateElement: (id, patch) => {
-		set((state) => ({
-			elements: state.elements.map((el) =>
-				el.id === id ? ({ ...el, ...patch } as CertificateElement) : el,
-			),
-			dirty: true,
-		}));
+		set((state) =>
+			state.metadataSaving
+				? state
+				: {
+						elements: state.elements.map((el) =>
+							el.id === id ? ({ ...el, ...patch } as CertificateElement) : el,
+						),
+						dirty: true,
+						revision: state.revision + 1,
+					},
+		);
 	},
 
 	removeElement: (id) => {
-		set((state) => ({
-			elements: state.elements.filter((el) => el.id !== id),
-			selectedId: state.selectedId === id ? null : state.selectedId,
-			dirty: true,
-		}));
+		set((state) =>
+			state.metadataSaving
+				? state
+				: {
+						elements: state.elements.filter((el) => el.id !== id),
+						selectedId: state.selectedId === id ? null : state.selectedId,
+						dirty: true,
+						revision: state.revision + 1,
+					},
+		);
 	},
 
 	bringForward: (id) => {
-		set((state) => {
-			const sorted = [...state.elements].sort((a, b) => a.zIndex - b.zIndex);
-			const index = sorted.findIndex((el) => el.id === id);
-			if (index === -1 || index === sorted.length - 1) return state;
-			const current = sorted[index];
-			const next = sorted[index + 1];
-			return {
-				elements: state.elements.map((el) => {
-					if (el.id === current.id) return { ...el, zIndex: next.zIndex };
-					if (el.id === next.id) return { ...el, zIndex: current.zIndex };
-					return el;
-				}),
-				dirty: true,
-			};
-		});
+		set((state) =>
+			state.metadataSaving
+				? state
+				: {
+						elements: moveElementLayer(state.elements, id, "forward"),
+						dirty: true,
+						revision: state.revision + 1,
+					},
+		);
 	},
 
 	sendBackward: (id) => {
-		set((state) => {
-			const sorted = [...state.elements].sort((a, b) => a.zIndex - b.zIndex);
-			const index = sorted.findIndex((el) => el.id === id);
-			if (index <= 0) return state;
-			const current = sorted[index];
-			const prev = sorted[index - 1];
-			return {
-				elements: state.elements.map((el) => {
-					if (el.id === current.id) return { ...el, zIndex: prev.zIndex };
-					if (el.id === prev.id) return { ...el, zIndex: current.zIndex };
-					return el;
-				}),
-				dirty: true,
-			};
-		});
+		set((state) =>
+			state.metadataSaving
+				? state
+				: {
+						elements: moveElementLayer(state.elements, id, "backward"),
+						dirty: true,
+						revision: state.revision + 1,
+					},
+		);
 	},
 
 	save: async (token) => {
-		const { template, elements } = get();
-		if (!template) return;
+		const { template, elements, revision, saving, metadataSaving } = get();
+		if (!template || saving || metadataSaving) return;
 		set({ saving: true, error: null });
 		try {
 			await apiSend(
@@ -274,9 +303,57 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
 				{ design: serializeCertificateDesign({ elements }) },
 				token,
 			);
-			set({ saving: false, dirty: false });
+			set((state) => ({
+				saving: false,
+				dirty: state.revision === revision ? false : state.dirty,
+			}));
 		} catch (err) {
 			set({ error: err instanceof Error ? err.message : "Failed to save", saving: false });
+		}
+	},
+
+	saveMetadata: async ({ name, file }, token) => {
+		const { template, elements, saving, metadataSaving } = get();
+		if (!template || saving || metadataSaving) return false;
+		const trimmedName = name.trim();
+		if (!trimmedName) {
+			set({ error: "Template name is required." });
+			return false;
+		}
+
+		set({ metadataSaving: true, error: null });
+		try {
+			const payload: Record<string, unknown> = {
+				name: trimmedName,
+				design: serializeCertificateDesign({ elements }),
+			};
+			if (file) {
+				const buffer = await file.arrayBuffer();
+				payload.imageData = btoa(
+					new Uint8Array(buffer).reduce(
+						(data, byte) => data + String.fromCharCode(byte),
+						"",
+					),
+				);
+				payload.imageExt =
+					file.name.substring(file.name.lastIndexOf(".")) || ".png";
+			}
+
+			await apiSend(
+				`/api/admin/templates/${template.id}`,
+				"PATCH",
+				payload,
+				token,
+			);
+			await get().load(template.id, token);
+			return true;
+		} catch (err) {
+			set({
+				error:
+					err instanceof Error ? err.message : "Failed to update template",
+				metadataSaving: false,
+			});
+			return false;
 		}
 	},
 

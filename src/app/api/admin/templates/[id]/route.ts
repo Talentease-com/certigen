@@ -4,6 +4,11 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "#/db";
 import { templates } from "#/db/schema";
+import {
+	parseCertificateDesignStrict,
+	scaleCertificateDesign,
+	serializeCertificateDesign,
+} from "#/lib/certificate-design";
 import { saveTemplate, readFile } from "#/server/services/storage";
 import { errorResponse, requireAdminFromRequest, zodErrorResponse } from "#/server/api-utils";
 
@@ -41,7 +46,7 @@ export async function GET(
 }
 
 const updateTemplateInput = z.object({
-	name: z.string().optional(),
+	name: z.string().min(1).optional(),
 	design: z.string().optional(),
 	imageData: z.string().optional(),
 	imageExt: z.string().optional(),
@@ -60,10 +65,22 @@ export async function PATCH(
 		if (!parsed.success) return zodErrorResponse(parsed.error);
 		const data = parsed.data;
 
+		const existing = await db.query.templates.findFirst({
+			where: eq(templates.id, id),
+		});
+		if (!existing) {
+			throw Object.assign(new Error("Template not found"), { status: 404 });
+		}
+
 		const updates: Record<string, unknown> = {};
 		if (data.name !== undefined) updates.name = data.name;
-		if (data.design !== undefined) updates.design = data.design;
 		if (data.isActive !== undefined) updates.isActive = data.isActive;
+
+		let design =
+			data.design !== undefined
+				? parseCertificateDesignStrict(data.design)
+				: null;
+		if (design) updates.design = serializeCertificateDesign(design);
 
 		if (data.imageData) {
 			const buffer = Buffer.from(data.imageData, "base64");
@@ -76,6 +93,20 @@ export async function PATCH(
 			if (!metadata.width || !metadata.height) {
 				throw new Error("Could not read the uploaded image's dimensions.");
 			}
+
+			if (
+				metadata.width !== existing.width ||
+				metadata.height !== existing.height
+			) {
+				design ??= parseCertificateDesignStrict(existing.design);
+				design = scaleCertificateDesign(
+					design,
+					{ width: existing.width, height: existing.height },
+					{ width: metadata.width, height: metadata.height },
+				);
+				updates.design = serializeCertificateDesign(design);
+			}
+
 			updates.width = metadata.width;
 			updates.height = metadata.height;
 			updates.filePath = await saveTemplate(id, buffer, ext);

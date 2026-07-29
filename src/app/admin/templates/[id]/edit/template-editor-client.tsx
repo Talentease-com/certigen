@@ -63,6 +63,7 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 		assetUrls,
 		loading,
 		saving,
+		metadataSaving,
 		dirty,
 		error,
 		previewUrl,
@@ -77,6 +78,7 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 		bringForward,
 		sendBackward,
 		save,
+		saveMetadata,
 		testGenerate,
 		reset,
 	} = useTemplateEditorStore();
@@ -163,7 +165,7 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 						type="button"
 						className="btn-secondary text-sm"
 						onClick={() => testGenerate(identity?.token)}
-						disabled={previewing}
+						disabled={previewing || saving || metadataSaving}
 					>
 						{previewing ? "Generating..." : "🔄 Test Generate"}
 					</button>
@@ -171,7 +173,7 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 						type="button"
 						className="btn-primary text-sm"
 						onClick={() => save(identity?.token)}
-						disabled={saving || !dirty}
+						disabled={saving || metadataSaving || !dirty}
 					>
 						{saving ? "Saving..." : "Save"}
 					</button>
@@ -184,19 +186,34 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 				</div>
 			)}
 
-			<TemplateMetaPanel template={template} token={identity?.token} onSaved={loadTemplate} />
+			<TemplateMetaPanel
+				template={template}
+				saving={metadataSaving}
+				onSave={(data) => saveMetadata(data, identity?.token)}
+			/>
 
 			<EditorGuide />
 
-			<div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 items-start">
+			<div
+				className={`grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 items-start transition-opacity ${
+					metadataSaving ? "pointer-events-none opacity-60" : ""
+				}`}
+				aria-busy={metadataSaving}
+			>
 				<div>
 					<div className="flex items-center gap-2 mb-3">
-						<button type="button" className="btn-secondary text-xs" onClick={addText}>
+						<button
+							type="button"
+							className="btn-secondary text-xs"
+							onClick={addText}
+							disabled={metadataSaving}
+						>
 							+ Text
 						</button>
 						<select
 							className="input-field text-xs py-1.5 w-auto"
 							value=""
+							disabled={metadataSaving}
 							onChange={(e) => {
 								if (e.target.value) addDynamicField(e.target.value as DynamicField);
 							}}
@@ -208,13 +225,18 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
 								</option>
 							))}
 						</select>
-						<label className="btn-secondary text-xs cursor-pointer">
+						<label
+							className={`btn-secondary text-xs ${
+								metadataSaving ? "cursor-not-allowed" : "cursor-pointer"
+							}`}
+						>
 							+ Image
 							<input
 								ref={imageInputRef}
 								type="file"
 								accept="image/*"
 								className="hidden"
+								disabled={metadataSaving}
 								onChange={handleAddImageFile}
 							/>
 						</label>

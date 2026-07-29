@@ -15,46 +15,49 @@
 ALTER TABLE "templates" ADD COLUMN IF NOT EXISTS "design" text;
 
 UPDATE "templates" AS t
-SET "design" = (
-	COALESCE(
-		(
-			SELECT jsonb_agg(
-				jsonb_build_object(
-					'id', 'legacy-' || p.idx::text,
-					'type', 'text',
-					'boundTo', p.elem->>'key',
-					'content', '',
-					'x', COALESCE((p.elem->>'x')::numeric, 0),
-					'y', COALESCE((p.elem->>'y')::numeric, 0),
-					'width', t.width,
-					'height', COALESCE((p.elem->>'fontSize')::numeric, 48) * 2,
-					'rotation', 0,
-					'zIndex', p.idx,
-					'opacity', 1,
-					'fontFamily', COALESCE(p.elem->>'fontFamily', 'Inter'),
-					'fontSize', COALESCE((p.elem->>'fontSize')::numeric, 48),
-					'color', COALESCE(p.elem->>'color', '#333333'),
-					'align', COALESCE(p.elem->>'align', 'center')
+SET "design" = jsonb_build_object(
+	'elements',
+	(
+		COALESCE(
+			(
+				SELECT jsonb_agg(
+					jsonb_build_object(
+						'id', 'legacy-' || p.idx::text,
+						'type', 'text',
+						'boundTo', p.elem->>'key',
+						'content', '',
+						'x', COALESCE((p.elem->>'x')::numeric, 0),
+						'y', COALESCE((p.elem->>'y')::numeric, 0),
+						'width', t.width,
+						'height', COALESCE((p.elem->>'fontSize')::numeric, 48) * 2,
+						'rotation', 0,
+						'zIndex', p.idx,
+						'opacity', 1,
+						'fontFamily', COALESCE(p.elem->>'fontFamily', 'Inter'),
+						'fontSize', COALESCE((p.elem->>'fontSize')::numeric, 48),
+						'color', COALESCE(p.elem->>'color', '#333333'),
+						'align', COALESCE(p.elem->>'align', 'center')
+					)
 				)
+				FROM jsonb_array_elements(
+					COALESCE(NULLIF(t."placeholders", '')::jsonb, '[]'::jsonb)
+				) WITH ORDINALITY AS p(elem, idx)
+			),
+			'[]'::jsonb
+		)
+		||
+		jsonb_build_array(
+			jsonb_build_object(
+				'id', 'legacy-qr',
+				'type', 'qr',
+				'x', t."width" - 320,
+				'y', t."height" - 320,
+				'width', 280,
+				'height', 280,
+				'rotation', 0,
+				'zIndex', 999,
+				'opacity', 1
 			)
-			FROM jsonb_array_elements(
-				COALESCE(NULLIF(t."placeholders", '')::jsonb, '[]'::jsonb)
-			) WITH ORDINALITY AS p(elem, idx)
-		),
-		'[]'::jsonb
-	)
-	||
-	jsonb_build_array(
-		jsonb_build_object(
-			'id', 'legacy-qr',
-			'type', 'qr',
-			'x', t."width" - 320,
-			'y', t."height" - 320,
-			'width', 280,
-			'height', 280,
-			'rotation', 0,
-			'zIndex', 999,
-			'opacity', 1
 		)
 	)
 ) :: text

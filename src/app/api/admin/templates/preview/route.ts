@@ -35,8 +35,9 @@ export async function POST(request: Request) {
 			templateHeight: template.height,
 			elements: data.elements,
 			values: {
-				name: "Jane Doe",
-				workshop_title: "Sample Workshop Title",
+				name: "Alexandria Catherine Montgomery-Wellington",
+				workshop_title:
+					"Advanced Leadership, Innovation, and Strategic Transformation Workshop",
 				date: new Date().toLocaleDateString("en-US", {
 					year: "numeric",
 					month: "long",
