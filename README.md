@@ -38,6 +38,28 @@ the origin requires registering the new ID.
 pnpm dev
 ```
 
+## Production Database Migration
+
+The migration commands default to reading `neon_clone` and creating
+`nextjs_migrated` on the same PostgreSQL server as `DATABASE_URL`.
+`neon_clone` is opened with PostgreSQL read-only mode enabled, and the migration
+refuses to overwrite an existing target database.
+
+```bash
+pnpm db:migrate-production
+pnpm db:compare-migrated
+```
+
+Override the database names with `MIGRATION_SOURCE_DATABASE` and
+`MIGRATION_TARGET_DATABASE` when needed. After reconciliation passes, point the
+deployed application's `DATABASE_URL` at the migrated database.
+
+Template visuals are immutable after issuance. Each editor save creates a new
+`template_versions` row and a version-specific background key; certificates
+retain the exact version they were issued with. Migrated certificates prefer
+their original stored PNG and fall back to their pinned initial version if that
+file is unavailable.
+
 ## Elevate LMS Integration
 
 Certigen exposes a server-to-server REST endpoint for Elevate LMS:
@@ -56,5 +78,5 @@ Service certificate requests are idempotent by `source.platform + source.idempot
 the same request returns the existing certificate; reusing the key with different certificate data
 returns `409`.
 
-Apply `drizzle/0000_service_certificates.sql` before enabling the integration in an environment with
-an existing database.
+Apply the numbered migrations in `drizzle/` before enabling the integration in
+an existing environment.

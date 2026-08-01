@@ -7,6 +7,10 @@ import {
 	type RenderedCertificate,
 } from "#/server/services/certificate-render";
 import { sendCertificateEmail } from "#/server/services/email";
+import {
+	loadCurrentTemplateVersion,
+	loadTemplateVersionById,
+} from "#/server/services/template-versions";
 
 export interface ServiceCertificateInput {
 	templateName: string;
@@ -98,7 +102,13 @@ async function loadTemplateByName(name: string) {
 		});
 	}
 
-	return rows[0];
+	const template = rows[0];
+	const version = await loadCurrentTemplateVersion(template.id);
+	if (!version) {
+		throw new Error(`Template has no current version: ${name}`);
+	}
+
+	return { template, version };
 }
 
 /**
@@ -141,7 +151,9 @@ async function sendAndTrackEmail(
 export async function createServiceCertificate(
 	input: ServiceCertificateInput,
 ): Promise<ServiceCertificateResult> {
-	const template = await loadTemplateByName(input.templateName);
+	const { template, version: currentVersion } = await loadTemplateByName(
+		input.templateName,
+	);
 	const email = normalizeEmail(input.recipient.email);
 
 	const existing = await db.query.certificates.findFirst({
@@ -158,9 +170,13 @@ export async function createServiceCertificate(
 			return toResponse(existing.id, "sent");
 		}
 
-		// template is already loaded above; service certs never have a
-		// workshop, so render directly instead of re-fetching everything.
-		const rendered = await renderCertificate(existing, null, template);
+		const pinnedVersion = await loadTemplateVersionById(
+			existing.templateVersionId,
+		);
+		if (!pinnedVersion) {
+			throw new Error("Certificate template version not found.");
+		}
+		const rendered = await renderCertificate(existing, null, pinnedVersion);
 		if (!rendered) {
 			throw new Error("Failed to render certificate image.");
 		}
@@ -175,6 +191,7 @@ export async function createServiceCertificate(
 		.values({
 			id: certId,
 			templateId: template.id,
+			templateVersionId: currentVersion.id,
 			sourcePlatform: input.source.platform,
 			externalId: sourceExternalId(input.source),
 			idempotencyKey: input.source.idempotencyKey,
@@ -186,7 +203,7 @@ export async function createServiceCertificate(
 		})
 		.returning();
 
-	const rendered = await renderCertificate(certRow, null, template);
+	const rendered = await renderCertificate(certRow, null, currentVersion);
 	if (!rendered) {
 		throw new Error("Failed to render certificate image.");
 	}

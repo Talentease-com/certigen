@@ -3,7 +3,10 @@
 -- workshops/certificates that already reference it keep working.
 ALTER TABLE "templates" ADD COLUMN IF NOT EXISTS "is_active" boolean DEFAULT true NOT NULL;
 
--- Certificate images are never persisted — they're re-rendered on demand
--- from the template on every download/preview/email, so there's no file to
--- track a path for.
-ALTER TABLE "certificates" DROP COLUMN IF EXISTS "file_path";
+-- New certificates are rendered on demand, but keep the old storage key for
+-- certificates issued before the cutover. A historical template may have
+-- changed since a certificate was issued, so this compatibility field lets
+-- existing download links serve the exact original image when it still
+-- exists. New rows leave it NULL.
+ALTER TABLE "certificates" RENAME COLUMN "file_path" TO "legacy_file_path";
+ALTER TABLE "certificates" ALTER COLUMN "legacy_file_path" DROP NOT NULL;

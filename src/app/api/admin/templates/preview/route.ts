@@ -6,6 +6,7 @@ import { templates } from "#/db/schema";
 import { certificateElementSchema } from "#/lib/certificate-design";
 import { generateCertificateImage } from "#/server/services/certificate-gen";
 import { readFile } from "#/server/services/storage";
+import { loadCurrentTemplateVersion } from "#/server/services/template-versions";
 import { errorResponse, requireAdminFromRequest, zodErrorResponse } from "#/server/api-utils";
 
 export const runtime = "nodejs";
@@ -27,12 +28,14 @@ export async function POST(request: Request) {
 			where: eq(templates.id, data.templateId),
 		});
 		if (!template) throw new Error("Template not found");
-		const templateBuffer = await readFile(template.filePath);
+		const version = await loadCurrentTemplateVersion(template.id);
+		if (!version) throw new Error("Template has no current version");
+		const templateBuffer = await readFile(version.filePath);
 
 		const { pngBuffer } = await generateCertificateImage({
 			templateBuffer,
-			templateWidth: template.width,
-			templateHeight: template.height,
+			templateWidth: version.width,
+			templateHeight: version.height,
 			elements: data.elements,
 			values: {
 				name: "Alexandria Catherine Montgomery-Wellington",

@@ -27,7 +27,14 @@ SET "design" = jsonb_build_object(
 						'boundTo', p.elem->>'key',
 						'content', '',
 						'x', COALESCE((p.elem->>'x')::numeric, 0),
-						'y', COALESCE((p.elem->>'y')::numeric, 0),
+						-- The legacy renderer treated y as the top of an SVG
+						-- whose text baseline was 1.5 * fontSize below it. The
+						-- layered renderer's baseline is 1 * fontSize below the
+						-- element y, so add half a font size to preserve the
+						-- historical glyph position.
+						'y',
+							COALESCE((p.elem->>'y')::numeric, 0)
+							+ COALESCE((p.elem->>'fontSize')::numeric, 48) / 2,
 						'width', t.width,
 						'height', COALESCE((p.elem->>'fontSize')::numeric, 48) * 2,
 						'rotation', 0,

@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, count, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "#/db";
 import { certificates, templates, workshops } from "#/db/schema";
 import { generateCertId } from "#/server/services/certificate-gen";
-import { renderCertificate } from "#/server/services/certificate-render";
+import {
+	renderCertificate,
+	renderCertificateById,
+	type RenderedCertificate,
+} from "#/server/services/certificate-render";
 import { sendCertificateEmail } from "#/server/services/email";
+import { loadCurrentTemplateVersion } from "#/server/services/template-versions";
 import { errorResponse, zodErrorResponse } from "#/server/api-utils";
 
 export const runtime = "nodejs";
@@ -15,6 +20,40 @@ const generateCertInput = z.object({
 	email: z.string().email(),
 	workshopCode: z.string().min(1),
 });
+
+function queueCertificateEmail(
+	certId: string,
+	rendered: RenderedCertificate,
+): void {
+	sendCertificateEmail({
+		to: rendered.email,
+		participantName: rendered.name,
+		workshopTitle: rendered.workshopTitle,
+		workshopDate: rendered.workshopDate,
+		imageBuffer: rendered.pngBuffer,
+		verifyUrl: rendered.verifyUrl,
+	}).then(
+		() =>
+			db
+				.update(certificates)
+				.set({
+					emailStatus: "sent",
+					emailSentAt: new Date(),
+					emailError: null,
+				})
+				.where(eq(certificates.id, certId)),
+		(err) => {
+			console.error("Failed to send certificate email:", err);
+			return db
+				.update(certificates)
+				.set({
+					emailStatus: "failed",
+					emailError: err instanceof Error ? err.message : String(err),
+				})
+				.where(eq(certificates.id, certId));
+		},
+	);
+}
 
 export async function POST(request: Request) {
 	const parsed = generateCertInput.safeParse(await request.json());
@@ -34,24 +73,32 @@ export async function POST(request: Request) {
 			throw new Error("Invalid or inactive workshop code.");
 		}
 
-		// 2. Check rate limit: max 2 certs per email per workshop
-		const [existing] = await db
-			.select({ total: count() })
-			.from(certificates)
-			.where(
-				and(
-					eq(certificates.email, email.toLowerCase()),
-					eq(certificates.workshopId, workshop.id),
-				),
-			);
-
-		if (existing.total >= 2) {
-			throw new Error(
-				"You have already generated the maximum of 2 certificates for this workshop.",
-			);
+		// A repeated request is a resend, not a reissue. Preserve the original
+		// participant data, template revision, issue timestamp, and verify URL.
+		const normalizedEmail = email.toLowerCase();
+		const existing = await db.query.certificates.findFirst({
+			where: and(
+				eq(certificates.email, normalizedEmail),
+				eq(certificates.workshopId, workshop.id),
+			),
+		});
+		if (existing) {
+			const rendered = await renderCertificateById(existing.id);
+			if (!rendered) throw new Error("Failed to render certificate image.");
+			await db
+				.update(certificates)
+				.set({ emailStatus: "pending", emailError: null })
+				.where(eq(certificates.id, existing.id));
+			queueCertificateEmail(existing.id, rendered);
+			return NextResponse.json({
+				certId: existing.id,
+				downloadUrl: `/api/certificates/${existing.id}/download`,
+				remainingAttempts: 0,
+				wasResent: true,
+			});
 		}
 
-		// 3. Confirm a template is configured (the render step will need it later)
+		// Confirm the logical template and its current immutable revision.
 		const template = workshop.templateId
 			? await db.query.templates.findFirst({
 					where: eq(templates.id, workshop.templateId),
@@ -61,12 +108,12 @@ export async function POST(request: Request) {
 		if (!template) {
 			throw new Error("No template configured for this workshop.");
 		}
+		const version = await loadCurrentTemplateVersion(template.id);
+		if (!version) {
+			throw new Error("Template has no current version.");
+		}
 
-		// 4. Record the certificate. No image is written to storage — it's
-		// rendered on demand (see certificate-render.ts) whenever it's needed.
-		// The id is only a *proposed* id: on conflict (re-generating for the
-		// same email+workshop), the existing row's id must be preserved —
-		// otherwise previously issued verify links / QR codes would 404.
+		// Record the immutable revision used for this issuance.
 		const proposedCertId = generateCertId();
 
 		const [certRow] = await db
@@ -75,73 +122,52 @@ export async function POST(request: Request) {
 				id: proposedCertId,
 				workshopId: workshop.id,
 				templateId: template.id,
+				templateVersionId: version.id,
 				certificateTitle: workshop.title,
 				certificateDate: workshop.date,
 				name,
-				email: email.toLowerCase(),
+				email: normalizedEmail,
 				emailStatus: "pending",
 				emailError: null,
 			})
-			.onConflictDoUpdate({
+			.onConflictDoNothing({
 				target: [certificates.email, certificates.workshopId],
-				set: {
-					name,
-					templateId: template.id,
-					certificateTitle: workshop.title,
-					certificateDate: workshop.date,
-					emailStatus: "pending",
-					emailError: null,
-					issuedAt: new Date(),
-				},
 			})
 			.returning();
 
-		const certId = certRow.id;
+		// A concurrent request may have won the unique email/workshop insert.
+		// Treat that exactly like any other resend.
+		if (!certRow) {
+			const raced = await db.query.certificates.findFirst({
+				where: and(
+					eq(certificates.email, normalizedEmail),
+					eq(certificates.workshopId, workshop.id),
+				),
+			});
+			if (!raced) throw new Error("Failed to create certificate.");
+			const rendered = await renderCertificateById(raced.id);
+			if (!rendered) throw new Error("Failed to render certificate image.");
+			queueCertificateEmail(raced.id, rendered);
+			return NextResponse.json({
+				certId: raced.id,
+				downloadUrl: `/api/certificates/${raced.id}/download`,
+				remainingAttempts: 0,
+				wasResent: true,
+			});
+		}
 
-		// 5. Render once for the email attachment, then send (non-blocking).
-		// workshop/template are already loaded above, so render directly from
-		// them instead of re-fetching cert/workshop/template inside
-		// renderCertificateById.
-		const rendered = await renderCertificate(certRow, workshop, template);
+		const certId = certRow.id;
+		const rendered = await renderCertificate(certRow, workshop, version);
 		if (!rendered) {
 			throw new Error("Failed to render certificate image.");
 		}
+		queueCertificateEmail(certId, rendered);
 
-		sendCertificateEmail({
-			to: email,
-			participantName: rendered.name,
-			workshopTitle: rendered.workshopTitle,
-			workshopDate: rendered.workshopDate,
-			imageBuffer: rendered.pngBuffer,
-			verifyUrl: rendered.verifyUrl,
-		}).then(
-			() =>
-				db
-					.update(certificates)
-					.set({
-						emailStatus: "sent",
-						emailSentAt: new Date(),
-						emailError: null,
-					})
-					.where(eq(certificates.id, certId)),
-			(err) => {
-				console.error("Failed to send certificate email:", err);
-				return db
-					.update(certificates)
-					.set({
-						emailStatus: "failed",
-						emailError: err instanceof Error ? err.message : String(err),
-					})
-					.where(eq(certificates.id, certId));
-			},
-		);
-
-		// 6. Return result
-		const remainingAttempts = 2 - (existing.total + 1);
 		return NextResponse.json({
 			certId,
 			downloadUrl: `/api/certificates/${certId}/download`,
-			remainingAttempts,
+			remainingAttempts: 1,
+			wasResent: false,
 		});
 	} catch (err) {
 		return errorResponse(err);

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { z } from "zod";
-import { desc } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "#/db";
-import { templates } from "#/db/schema";
+import { templates, templateVersions } from "#/db/schema";
 import { defaultDesign, serializeCertificateDesign } from "#/lib/certificate-design";
-import { saveTemplate } from "#/server/services/storage";
+import { saveTemplateVersionBackground } from "#/server/services/storage";
 import { errorResponse, requireAdminFromRequest, zodErrorResponse } from "#/server/api-utils";
 
 export const runtime = "nodejs";
@@ -19,13 +19,20 @@ export async function GET(request: Request) {
 			.select({
 				id: templates.id,
 				name: templates.name,
-				width: templates.width,
-				height: templates.height,
-				design: templates.design,
+				width: templateVersions.width,
+				height: templateVersions.height,
+				design: templateVersions.design,
 				isActive: templates.isActive,
 				createdAt: templates.createdAt,
 			})
 			.from(templates)
+			.innerJoin(
+				templateVersions,
+				and(
+					eq(templateVersions.templateId, templates.id),
+					eq(templateVersions.isCurrent, true),
+				),
+			)
 			.orderBy(desc(templates.createdAt));
 
 		return NextResponse.json({ templates: rows });
@@ -49,6 +56,7 @@ export async function POST(request: Request) {
 		const data = parsed.data;
 
 		const id = nanoid(12);
+		const versionId = nanoid(12);
 		const buffer = Buffer.from(data.imageData, "base64");
 
 		// The canvas must match the image's *actual* pixel size — assuming a
@@ -62,20 +70,33 @@ export async function POST(request: Request) {
 			throw new Error("Could not read the uploaded image's dimensions.");
 		}
 
-		const filePath = await saveTemplate(id, buffer, data.imageExt);
+		const filePath = await saveTemplateVersionBackground(
+			id,
+			versionId,
+			buffer,
+			data.imageExt,
+		);
 
 		// Give every new template a sensible starting layout (name / workshop
 		// title / date / QR) so it's immediately usable; the admin can then
 		// open the canvas editor to reposition things or add logos.
 		const design = defaultDesign(width, height);
 
-		await db.insert(templates).values({
-			id,
-			name: data.name,
-			filePath,
-			design: serializeCertificateDesign(design),
-			width,
-			height,
+		await db.transaction(async (tx) => {
+			await tx.insert(templates).values({
+				id,
+				name: data.name,
+			});
+			await tx.insert(templateVersions).values({
+				id: versionId,
+				templateId: id,
+				versionNumber: 1,
+				filePath,
+				design: serializeCertificateDesign(design),
+				width,
+				height,
+				isCurrent: true,
+			});
 		});
 
 		return NextResponse.json({ id, name: data.name, width, height });

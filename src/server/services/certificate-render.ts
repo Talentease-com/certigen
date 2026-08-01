@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db } from "#/db";
-import { certificates, templates, workshops } from "#/db/schema";
+import { certificates, templateVersions, workshops } from "#/db/schema";
 import { parseCertificateDesign } from "#/lib/certificate-design";
 import { generateCertificateImage } from "./certificate-gen";
 import { readFile } from "./storage";
+import { loadTemplateVersionById } from "./template-versions";
 
 export interface RenderedCertificate {
 	pngBuffer: Buffer;
@@ -17,12 +18,12 @@ export interface RenderedCertificate {
 
 type Certificate = typeof certificates.$inferSelect;
 type Workshop = typeof workshops.$inferSelect;
-type Template = typeof templates.$inferSelect;
+type TemplateVersion = typeof templateVersions.$inferSelect;
 
 /**
- * Certificates are never stored as files — only the DB row is persisted.
- * The image is re-rendered on demand every time it's downloaded, previewed,
- * or emailed.
+ * New certificates are rendered on demand from an immutable template version.
+ * Migrated certificates may retain an exact historical image, handled by
+ * renderCertificateById before it reaches this function.
  *
  * Renders from already-loaded records, so callers that already fetched the
  * cert/workshop/template (e.g. the generation route, right after inserting)
@@ -31,21 +32,21 @@ type Template = typeof templates.$inferSelect;
 export async function renderCertificate(
 	cert: Certificate,
 	workshop: Workshop | null,
-	template: Template,
+	version: TemplateVersion,
 ): Promise<RenderedCertificate | null> {
 	const title = cert.certificateTitle ?? workshop?.title;
 	const date = cert.certificateDate ?? workshop?.date;
 	if (!title || !date) return null;
 
-	const design = parseCertificateDesign(template.design);
+	const design = parseCertificateDesign(version.design);
 	const baseUrl = process.env.BASE_URL || "http://localhost:3000";
 	const verifyUrl = `${baseUrl}/verify/${cert.id}`;
-	const templateBuffer = await readFile(template.filePath);
+	const templateBuffer = await readFile(version.filePath);
 
 	const { pngBuffer } = await generateCertificateImage({
 		templateBuffer,
-		templateWidth: template.width,
-		templateHeight: template.height,
+		templateWidth: version.width,
+		templateHeight: version.height,
 		elements: design.elements,
 		values: {
 			name: cert.name,
@@ -76,11 +77,9 @@ export async function renderCertificate(
  *    certificateDate, templateId), since there's no workshop to derive them
  *    from.
  *
- * The certificate's own templateId always wins over the workshop's current
- * one — a workshop's assigned template can change after certificates have
- * already been issued against it, and re-renders (downloads, resend emails)
- * must keep using the template the certificate was actually generated with.
- * Only legacy rows without a stored templateId fall back to the workshop.
+ * Every certificate is pinned to an immutable template version. Editing a
+ * template only creates a new current version for future certificates; it
+ * cannot change an already-issued certificate.
  */
 export async function renderCertificateById(
 	certId: string,
@@ -96,13 +95,35 @@ export async function renderCertificateById(
 			})
 		: null;
 
-	const templateId = cert.templateId ?? workshop?.templateId;
-	const template = templateId
-		? await db.query.templates.findFirst({
-				where: eq(templates.id, templateId),
-			})
-		: null;
-	if (!template) return null;
+	// Certificates migrated from the legacy system retain their original
+	// image path. Prefer that immutable issued artifact when it still exists;
+	// if storage is incomplete, fall back to the new on-demand renderer below.
+	if (cert.legacyFilePath) {
+		const title = cert.certificateTitle ?? workshop?.title;
+		const date = cert.certificateDate ?? workshop?.date;
+		if (title && date) {
+			try {
+				const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+				return {
+					pngBuffer: await readFile(cert.legacyFilePath),
+					filename: `${cert.name.replace(/\s+/g, "_")}_Certificate.png`,
+					name: cert.name,
+					email: cert.email,
+					workshopTitle: title,
+					workshopDate: date,
+					verifyUrl: `${baseUrl}/verify/${cert.id}`,
+				};
+			} catch (error) {
+				console.warn(
+					`Legacy certificate image unavailable for ${cert.id}; rendering on demand.`,
+					error,
+				);
+			}
+		}
+	}
 
-	return renderCertificate(cert, workshop ?? null, template);
+	const version = await loadTemplateVersionById(cert.templateVersionId);
+	if (!version) return null;
+
+	return renderCertificate(cert, workshop ?? null, version);
 }

@@ -6,6 +6,7 @@ interface GenerateResult {
 	certId: string;
 	downloadUrl: string;
 	remainingAttempts: number;
+	wasResent: boolean;
 }
 
 interface CertificateState {

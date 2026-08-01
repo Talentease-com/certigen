@@ -23,12 +23,13 @@ const storage = createStorage({
 			}),
 });
 
-export async function saveTemplate(
-	id: string,
+export async function saveTemplateVersionBackground(
+	templateId: string,
+	versionId: string,
 	buffer: Buffer,
 	ext: string,
 ): Promise<string> {
-	const key = `templates/${id}${ext}`;
+	const key = `templates/${templateId}/versions/${versionId}/background${ext}`;
 	await storage.setItemRaw(key, buffer);
 	return key;
 }
