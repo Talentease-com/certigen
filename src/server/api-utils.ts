@@ -2,6 +2,26 @@ import { NextResponse } from "next/server";
 import type { ZodError } from "zod";
 import { getBearerToken, requireAdmin, type ShooUser } from "./auth";
 
+// Low-level library errors that would otherwise leak straight to the UI —
+// translated to something a non-engineer can actually act on.
+const TECHNICAL_ERROR_PATTERNS: Array<[RegExp, string]> = [
+	[
+		/image to composite must have same dimensions or smaller/i,
+		"An element in this certificate's design doesn't fit within the template. Open the editor, make sure nothing is resized past the canvas edge, and save again.",
+	],
+	[
+		/libvips|vips[a-z]*error/i,
+		"Something went wrong preparing the certificate image. Please try again in a moment.",
+	],
+];
+
+function toFriendlyMessage(message: string): string {
+	for (const [pattern, friendly] of TECHNICAL_ERROR_PATTERNS) {
+		if (pattern.test(message)) return friendly;
+	}
+	return message;
+}
+
 export function errorResponse(err: unknown, fallbackStatus = 400) {
 	if (err instanceof Error) {
 		const explicitStatus =
@@ -11,7 +31,7 @@ export function errorResponse(err: unknown, fallbackStatus = 400) {
 			(err.message.toLowerCase().includes("unauthorized")
 				? 401
 				: fallbackStatus);
-		return NextResponse.json({ error: err.message }, { status });
+		return NextResponse.json({ error: toFriendlyMessage(err.message) }, { status });
 	}
 	return NextResponse.json({ error: "Unknown error" }, { status: fallbackStatus });
 }

@@ -15,7 +15,9 @@ SET
 	"certificate_title" = "workshops"."title",
 	"certificate_date" = "workshops"."date",
 	"template_id" = "workshops"."template_id",
-	"email_status" = 'sent',
-	"email_sent_at" = "certificates"."issued_at"
+	-- The legacy app dispatched email after saving the certificate but did not
+	-- persist whether delivery succeeded. Preserve that uncertainty instead of
+	-- fabricating a successful-delivery timestamp.
+	"email_status" = 'legacy_unknown'
 FROM "workshops"
 WHERE "certificates"."workshop_id" = "workshops"."id";

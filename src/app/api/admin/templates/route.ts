@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
+import sharp from "sharp";
 import { z } from "zod";
-import { desc } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "#/db";
-import { templates } from "#/db/schema";
-import { saveTemplate } from "#/server/services/storage";
+import { templates, templateVersions } from "#/db/schema";
+import { defaultDesign, serializeCertificateDesign } from "#/lib/certificate-design";
+import { saveTemplateVersionBackground } from "#/server/services/storage";
 import { errorResponse, requireAdminFromRequest, zodErrorResponse } from "#/server/api-utils";
 
 export const runtime = "nodejs";
@@ -17,12 +19,20 @@ export async function GET(request: Request) {
 			.select({
 				id: templates.id,
 				name: templates.name,
-				width: templates.width,
-				height: templates.height,
-				placeholders: templates.placeholders,
+				width: templateVersions.width,
+				height: templateVersions.height,
+				design: templateVersions.design,
+				isActive: templates.isActive,
 				createdAt: templates.createdAt,
 			})
 			.from(templates)
+			.innerJoin(
+				templateVersions,
+				and(
+					eq(templateVersions.templateId, templates.id),
+					eq(templateVersions.isCurrent, true),
+				),
+			)
 			.orderBy(desc(templates.createdAt));
 
 		return NextResponse.json({ templates: rows });
@@ -35,9 +45,6 @@ const uploadTemplateInput = z.object({
 	name: z.string().min(1),
 	imageData: z.string(), // Base64
 	imageExt: z.string().default(".png"),
-	placeholders: z.string(), // JSON
-	width: z.number().default(3508),
-	height: z.number().default(2480),
 });
 
 export async function POST(request: Request) {
@@ -49,19 +56,50 @@ export async function POST(request: Request) {
 		const data = parsed.data;
 
 		const id = nanoid(12);
+		const versionId = nanoid(12);
 		const buffer = Buffer.from(data.imageData, "base64");
-		const filePath = await saveTemplate(id, buffer, data.imageExt);
 
-		await db.insert(templates).values({
+		// The canvas must match the image's *actual* pixel size — assuming a
+		// fixed size (e.g. A4 at 300dpi) regardless of what was uploaded is
+		// what causes "Image to composite must have same dimensions or
+		// smaller" the moment someone uploads anything else.
+		const metadata = await sharp(buffer).metadata();
+		const width = metadata.width;
+		const height = metadata.height;
+		if (!width || !height) {
+			throw new Error("Could not read the uploaded image's dimensions.");
+		}
+
+		const filePath = await saveTemplateVersionBackground(
 			id,
-			name: data.name,
-			filePath,
-			placeholders: data.placeholders,
-			width: data.width,
-			height: data.height,
+			versionId,
+			buffer,
+			data.imageExt,
+		);
+
+		// Give every new template a sensible starting layout (name / workshop
+		// title / date / QR) so it's immediately usable; the admin can then
+		// open the canvas editor to reposition things or add logos.
+		const design = defaultDesign(width, height);
+
+		await db.transaction(async (tx) => {
+			await tx.insert(templates).values({
+				id,
+				name: data.name,
+			});
+			await tx.insert(templateVersions).values({
+				id: versionId,
+				templateId: id,
+				versionNumber: 1,
+				filePath,
+				design: serializeCertificateDesign(design),
+				width,
+				height,
+				isCurrent: true,
+			});
 		});
 
-		return NextResponse.json({ id, name: data.name });
+		return NextResponse.json({ id, name: data.name, width, height });
 	} catch (err) {
 		return errorResponse(err);
 	}

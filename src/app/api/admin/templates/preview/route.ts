@@ -3,22 +3,17 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "#/db";
 import { templates } from "#/db/schema";
-import {
-	generateCertId,
-	generateCertificateImage,
-} from "#/server/services/certificate-gen";
+import { certificateElementSchema } from "#/lib/certificate-design";
+import { generateCertificateImage } from "#/server/services/certificate-gen";
 import { readFile } from "#/server/services/storage";
+import { loadCurrentTemplateVersion } from "#/server/services/template-versions";
 import { errorResponse, requireAdminFromRequest, zodErrorResponse } from "#/server/api-utils";
 
 export const runtime = "nodejs";
 
 const testPreviewInput = z.object({
-	templateId: z.string().optional(),
-	imageData: z.string().optional(),
-	imageExt: z.string().optional(),
-	placeholders: z.string(),
-	width: z.number(),
-	height: z.number(),
+	templateId: z.string(),
+	elements: z.array(certificateElementSchema),
 });
 
 export async function POST(request: Request) {
@@ -29,39 +24,31 @@ export async function POST(request: Request) {
 		if (!parsed.success) return zodErrorResponse(parsed.error);
 		const data = parsed.data;
 
-		let templateBuffer: Buffer;
-
-		if (data.imageData) {
-			templateBuffer = Buffer.from(data.imageData, "base64");
-		} else if (data.templateId) {
-			const template = await db.query.templates.findFirst({
-				where: eq(templates.id, data.templateId),
-			});
-			if (!template) throw new Error("Template not found");
-			templateBuffer = await readFile(template.filePath);
-		} else {
-			throw new Error("Provide either templateId or imageData");
-		}
-
-		const placeholders = JSON.parse(data.placeholders);
-		const certId = generateCertId();
+		const template = await db.query.templates.findFirst({
+			where: eq(templates.id, data.templateId),
+		});
+		if (!template) throw new Error("Template not found");
+		const version = await loadCurrentTemplateVersion(template.id);
+		if (!version) throw new Error("Template has no current version");
+		const templateBuffer = await readFile(version.filePath);
 
 		const { pngBuffer } = await generateCertificateImage({
 			templateBuffer,
-			templateWidth: data.width,
-			templateHeight: data.height,
-			placeholders,
+			templateWidth: version.width,
+			templateHeight: version.height,
+			elements: data.elements,
 			values: {
-				name: "Jane Doe",
-				workshop_title: "Sample Workshop Title",
+				name: "Alexandria Catherine Montgomery-Wellington",
+				workshop_title:
+					"Advanced Leadership, Innovation, and Strategic Transformation Workshop",
 				date: new Date().toLocaleDateString("en-US", {
 					year: "numeric",
 					month: "long",
 					day: "numeric",
 				}),
 			},
-			certId,
 			verifyUrl: "https://certify.talentease.com/verify/example",
+			resolveAsset: readFile,
 		});
 
 		return NextResponse.json({ base64: pngBuffer.toString("base64") });

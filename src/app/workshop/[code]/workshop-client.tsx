@@ -158,13 +158,17 @@ export function WorkshopClient({
 						)}
 					</button>
 
-					{result.remainingAttempts > 0 && (
+					{result.wasResent ? (
+						<p className="text-sm text-green-600 mt-4">
+							Your original certificate was found and re-sent with its
+							original details and design preserved.
+						</p>
+					) : result.remainingAttempts > 0 ? (
 						<p className="text-sm text-green-600 mt-4">
 							You have <strong>{result.remainingAttempts} attempt(s)</strong>{" "}
 							remaining for this workshop.
 						</p>
-					)}
-					{result.remainingAttempts === 0 && (
+					) : (
 						<p className="text-sm text-amber-600 mt-4">
 							⚠️ No attempts remaining. This was your last certificate for this
 							workshop.

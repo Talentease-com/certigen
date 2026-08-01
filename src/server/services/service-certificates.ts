@@ -1,13 +1,16 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "#/db";
 import { certificates, templates } from "#/db/schema";
+import { generateCertId } from "#/server/services/certificate-gen";
 import {
-	generateCertId,
-	generateCertificateImage,
-	type PlaceholderConfig,
-} from "#/server/services/certificate-gen";
+	renderCertificate,
+	type RenderedCertificate,
+} from "#/server/services/certificate-render";
 import { sendCertificateEmail } from "#/server/services/email";
-import { readFile, saveFile } from "#/server/services/storage";
+import {
+	loadCurrentTemplateVersion,
+	loadTemplateVersionById,
+} from "#/server/services/template-versions";
 
 export interface ServiceCertificateInput {
 	templateName: string;
@@ -37,11 +40,6 @@ export interface ServiceCertificateResult {
 
 function baseUrl() {
 	return process.env.BASE_URL || "http://localhost:3000";
-}
-
-function serviceOutputDir(platform: string, idempotencyKey: string) {
-	const safeKey = idempotencyKey.replace(/[^a-zA-Z0-9._-]/g, "_");
-	return `certificates/service/${platform}/${safeKey}`;
 }
 
 function normalizeEmail(email: string) {
@@ -104,61 +102,38 @@ async function loadTemplateByName(name: string) {
 		});
 	}
 
-	return rows[0];
+	const template = rows[0];
+	const version = await loadCurrentTemplateVersion(template.id);
+	if (!version) {
+		throw new Error(`Template has no current version: ${name}`);
+	}
+
+	return { template, version };
 }
 
-async function generateAndSaveCertificate(
-	input: ServiceCertificateInput,
-	template: typeof templates.$inferSelect,
-	certId: string,
-) {
-	const placeholderConfigs: PlaceholderConfig[] = JSON.parse(template.placeholders);
-	const verifyUrl = `${baseUrl()}/verify/${certId}`;
-	const templateBuffer = await readFile(template.filePath);
-
-	const { pngBuffer } = await generateCertificateImage({
-		templateBuffer,
-		templateWidth: template.width,
-		templateHeight: template.height,
-		placeholders: placeholderConfigs,
-		values: {
-			name: input.recipient.name,
-			workshop_title: input.certificate.title,
-			date: input.certificate.date,
-		},
-		certId,
-		verifyUrl,
-	});
-
-	const fileKey = `${serviceOutputDir(input.source.platform, input.source.idempotencyKey)}/${certId}.png`;
-	await saveFile(fileKey, pngBuffer);
-	return { pngBuffer, fileKey, verifyUrl };
-}
-
+/**
+ * Emails a rendered certificate and tracks delivery status on the row
+ * either way. The image is never persisted — rendered on demand by the
+ * caller via renderCertificate.
+ */
 async function sendAndTrackEmail(
 	certId: string,
-	input: ServiceCertificateInput,
-	imageBuffer: Buffer,
-	verifyUrl: string,
+	rendered: RenderedCertificate,
 ): Promise<ServiceCertificateResult["emailStatus"]> {
 	try {
 		await sendCertificateEmail({
-			to: input.recipient.email,
-			participantName: input.recipient.name,
-			workshopTitle: input.certificate.title,
-			workshopDate: input.certificate.date,
-			imageBuffer,
-			verifyUrl,
+			to: rendered.email,
+			participantName: rendered.name,
+			workshopTitle: rendered.workshopTitle,
+			workshopDate: rendered.workshopDate,
+			imageBuffer: rendered.pngBuffer,
+			verifyUrl: rendered.verifyUrl,
 			certificateKind: "course",
 		});
 
 		await db
 			.update(certificates)
-			.set({
-				emailStatus: "sent",
-				emailSentAt: new Date(),
-				emailError: null,
-			})
+			.set({ emailStatus: "sent", emailSentAt: new Date(), emailError: null })
 			.where(eq(certificates.id, certId));
 
 		return "sent";
@@ -166,45 +141,19 @@ async function sendAndTrackEmail(
 		const message = err instanceof Error ? err.message : String(err);
 		await db
 			.update(certificates)
-			.set({
-				emailStatus: "failed",
-				emailError: message,
-			})
+			.set({ emailStatus: "failed", emailError: message })
 			.where(eq(certificates.id, certId));
 
 		return "failed";
 	}
 }
 
-async function retryExistingEmail(
-	existing: typeof certificates.$inferSelect,
-	input: ServiceCertificateInput,
-	template: typeof templates.$inferSelect,
-) {
-	let imageBuffer: Buffer;
-	try {
-		imageBuffer = await readFile(existing.filePath);
-	} catch {
-		const generated = await generateAndSaveCertificate(input, template, existing.id);
-		imageBuffer = generated.pngBuffer;
-		await db
-			.update(certificates)
-			.set({ filePath: generated.fileKey })
-			.where(eq(certificates.id, existing.id));
-	}
-
-	return sendAndTrackEmail(
-		existing.id,
-		input,
-		imageBuffer,
-		`${baseUrl()}/verify/${existing.id}`,
-	);
-}
-
 export async function createServiceCertificate(
 	input: ServiceCertificateInput,
 ): Promise<ServiceCertificateResult> {
-	const template = await loadTemplateByName(input.templateName);
+	const { template, version: currentVersion } = await loadTemplateByName(
+		input.templateName,
+	);
 	const email = normalizeEmail(input.recipient.email);
 
 	const existing = await db.query.certificates.findFirst({
@@ -216,34 +165,49 @@ export async function createServiceCertificate(
 
 	if (existing) {
 		assertSamePayload(existing, input, template.id);
-		const status =
-			existing.emailStatus === "sent"
-				? "sent"
-				: await retryExistingEmail(existing, input, template);
+
+		if (existing.emailStatus === "sent") {
+			return toResponse(existing.id, "sent");
+		}
+
+		const pinnedVersion = await loadTemplateVersionById(
+			existing.templateVersionId,
+		);
+		if (!pinnedVersion) {
+			throw new Error("Certificate template version not found.");
+		}
+		const rendered = await renderCertificate(existing, null, pinnedVersion);
+		if (!rendered) {
+			throw new Error("Failed to render certificate image.");
+		}
+		const status = await sendAndTrackEmail(existing.id, rendered);
 		return toResponse(existing.id, status);
 	}
 
 	const certId = generateCertId();
-	const { pngBuffer, fileKey, verifyUrl } = await generateAndSaveCertificate(
-		input,
-		template,
-		certId,
-	);
 
-	await db.insert(certificates).values({
-		id: certId,
-		templateId: template.id,
-		sourcePlatform: input.source.platform,
-		externalId: sourceExternalId(input.source),
-		idempotencyKey: input.source.idempotencyKey,
-		certificateTitle: input.certificate.title,
-		certificateDate: input.certificate.date,
-		name: input.recipient.name,
-		email,
-		filePath: fileKey,
-		emailStatus: "pending",
-	});
+	const [certRow] = await db
+		.insert(certificates)
+		.values({
+			id: certId,
+			templateId: template.id,
+			templateVersionId: currentVersion.id,
+			sourcePlatform: input.source.platform,
+			externalId: sourceExternalId(input.source),
+			idempotencyKey: input.source.idempotencyKey,
+			certificateTitle: input.certificate.title,
+			certificateDate: input.certificate.date,
+			name: input.recipient.name,
+			email,
+			emailStatus: "pending",
+		})
+		.returning();
 
-	const emailStatus = await sendAndTrackEmail(certId, input, pngBuffer, verifyUrl);
+	const rendered = await renderCertificate(certRow, null, currentVersion);
+	if (!rendered) {
+		throw new Error("Failed to render certificate image.");
+	}
+
+	const emailStatus = await sendAndTrackEmail(certId, rendered);
 	return toResponse(certId, emailStatus);
 }

@@ -22,6 +22,14 @@ export default function WorkshopsPage() {
 	const [editForm, setEditForm] = useState({ title: "", date: "", templateId: "" });
 	const [submitting, setSubmitting] = useState(false);
 
+	// Disabled templates can't be picked for new workshops. When editing,
+	// still surface the workshop's current template even if it's since been
+	// disabled, so the select doesn't silently lose the assigned value.
+	const activeTemplates = templatesList.filter((t) => t.isActive);
+	const editTemplateOptions = templatesList.filter(
+		(t) => t.isActive || t.id === editingWorkshop?.templateId,
+	);
+
 	useEffect(() => {
 		if (token) loadWorkshops();
 	}, [token, loadWorkshops]);
@@ -164,7 +172,7 @@ export default function WorkshopsPage() {
 								required
 							>
 								<option value="">Select a template...</option>
-								{templatesList.map((t) => (
+								{activeTemplates.map((t) => (
 									<option key={t.id} value={t.id}>
 										{t.name}
 									</option>
@@ -319,9 +327,10 @@ export default function WorkshopsPage() {
 									required
 								>
 									<option value="">Select a template...</option>
-									{templatesList.map((t) => (
+									{editTemplateOptions.map((t) => (
 										<option key={t.id} value={t.id}>
 											{t.name}
+											{!t.isActive ? " (disabled)" : ""}
 										</option>
 									))}
 								</select>
