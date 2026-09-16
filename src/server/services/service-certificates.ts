@@ -58,7 +58,7 @@ function toResponse(
 	return {
 		certId,
 		verifyUrl: `${origin}/verify/${certId}`,
-		downloadUrl: `${origin}/api/certificates/${certId}/download`,
+		downloadUrl: `${origin}/api/certificates/${certId}/file`,
 		emailStatus,
 	};
 }
