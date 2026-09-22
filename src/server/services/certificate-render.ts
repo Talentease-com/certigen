@@ -20,6 +20,24 @@ type Certificate = typeof certificates.$inferSelect;
 type Workshop = typeof workshops.$inferSelect;
 type TemplateVersion = typeof templateVersions.$inferSelect;
 
+function displayCertificateDate(value: string): string {
+	// Elevate sends an ISO instant. Keep the stored value unchanged for
+	// idempotent retries and format only the text shown on the certificate.
+	if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) {
+		return value;
+	}
+
+	const parsed = new Date(value);
+	if (Number.isNaN(parsed.getTime())) return value;
+
+	return new Intl.DateTimeFormat("en-US", {
+		month: "long",
+		day: "numeric",
+		year: "numeric",
+		timeZone: "UTC",
+	}).format(parsed);
+}
+
 /**
  * New certificates are rendered on demand from an immutable template version.
  * Migrated certificates may retain an exact historical image, handled by
@@ -35,8 +53,9 @@ export async function renderCertificate(
 	version: TemplateVersion,
 ): Promise<RenderedCertificate | null> {
 	const title = cert.certificateTitle ?? workshop?.title;
-	const date = cert.certificateDate ?? workshop?.date;
-	if (!title || !date) return null;
+	const storedDate = cert.certificateDate ?? workshop?.date;
+	if (!title || !storedDate) return null;
+	const date = displayCertificateDate(storedDate);
 
 	const design = parseCertificateDesign(version.design);
 	const baseUrl = process.env.BASE_URL || "http://localhost:3000";
