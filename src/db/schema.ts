@@ -80,6 +80,7 @@ export const certificates = pgTable(
 		// templateId/certificateTitle/certificateDate directly) whenever
 		// someone downloads or previews them.
 		emailStatus: text("email_status").notNull().default("pending"),
+		emailAttemptedAt: timestamp("email_attempted_at"),
 		emailSentAt: timestamp("email_sent_at"),
 		emailError: text("email_error"),
 		issuedAt: timestamp("issued_at").defaultNow().notNull(),

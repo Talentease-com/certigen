@@ -43,6 +43,7 @@ const certificate = {
 	email: "person@example.com",
 	legacyFilePath: null,
 	emailStatus: "sent",
+	emailAttemptedAt: null,
 	emailSentAt: null,
 	emailError: null,
 	issuedAt: new Date("2026-07-31T00:00:00Z"),
