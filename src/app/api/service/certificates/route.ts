@@ -5,7 +5,7 @@ import {
 	requireServiceApiKeyFromRequest,
 	zodErrorResponse,
 } from "#/server/api-utils";
-import { createServiceCertificate } from "#/server/services/service-certificates";
+import { createServiceCertificate, findServiceCertificate } from "#/server/services/service-certificates";
 
 export const runtime = "nodejs";
 
@@ -27,6 +27,28 @@ const serviceCertificateInput = z.object({
 		idempotencyKey: z.string().min(1).max(240),
 	}),
 });
+
+const serviceCertificateLookup = z.object({
+	platform: z.string().min(1).max(80),
+	idempotencyKey: z.string().min(1).max(240),
+});
+
+export async function GET(request: Request) {
+	try {
+		requireServiceApiKeyFromRequest(request);
+		const url = new URL(request.url);
+		const parsed = serviceCertificateLookup.safeParse({
+			platform: url.searchParams.get("platform"),
+			idempotencyKey: url.searchParams.get("idempotencyKey"),
+		});
+		if (!parsed.success) return zodErrorResponse(parsed.error);
+		return NextResponse.json(await findServiceCertificate(parsed.data.platform, parsed.data.idempotencyKey), {
+			headers: { "Cache-Control": "no-store" },
+		});
+	} catch (err) {
+		return errorResponse(err);
+	}
+}
 
 export async function POST(request: Request) {
 	try {

@@ -63,6 +63,23 @@ function toResponse(
 	};
 }
 
+/** Retrieve an issued artifact without changing its recipient, award, or email state. */
+export async function findServiceCertificate(
+	platform: string,
+	idempotencyKey: string,
+): Promise<ServiceCertificateResult> {
+	const existing = await db.query.certificates.findFirst({
+		where: and(
+			eq(certificates.sourcePlatform, platform),
+			eq(certificates.idempotencyKey, idempotencyKey),
+		),
+	});
+	if (!existing) {
+		throw Object.assign(new Error("Certificate not found"), { status: 404 });
+	}
+	return toResponse(existing.id, existing.emailStatus as ServiceCertificateResult["emailStatus"]);
+}
+
 function assertSamePayload(
 	existing: typeof certificates.$inferSelect,
 	input: ServiceCertificateInput,

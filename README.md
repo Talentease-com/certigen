@@ -78,5 +78,15 @@ Service certificate requests are idempotent by `source.platform + source.idempot
 the same request returns the existing certificate; reusing the key with different certificate data
 returns `409`.
 
+Retrieve the original issued links without resending email or submitting mutable learner details:
+
+```http
+GET /api/service/certificates?platform=elevate-lms&idempotencyKey=<url-encoded-key>
+Authorization: Bearer <CERTIGEN_SERVICE_API_KEY>
+```
+
+The response has the same `certId`, `verifyUrl`, `downloadUrl`, and `emailStatus` fields as issuance.
+An unknown identity returns `404`.
+
 Apply the numbered migrations in `drizzle/` before enabling the integration in
 an existing environment.
