@@ -78,5 +78,32 @@ Service certificate requests are idempotent by `source.platform + source.idempot
 the same request returns the existing certificate; reusing the key with different certificate data
 returns `409`.
 
+Retrieve the original issued links without resending email or submitting mutable learner details:
+
+```http
+GET /api/service/certificates?platform=elevate-lms&idempotencyKey=<url-encoded-key>
+Authorization: Bearer <CERTIGEN_SERVICE_API_KEY>
+```
+
+The response has the same `certId`, `verifyUrl`, `downloadUrl`, and `emailStatus` fields as issuance.
+An unknown identity returns `404`.
+
+Issuance now leaves `emailStatus=pending`; lookup never sends email. After Elevate stores the
+artifact links, it requests delivery explicitly using the same immutable service identity:
+
+```http
+POST /api/service/certificates/delivery
+Authorization: Bearer <CERTIGEN_SERVICE_API_KEY>
+Content-Type: application/json
+
+{"platform":"elevate-lms","idempotencyKey":"<original-key>"}
+```
+
+The endpoint returns the original links and email state. It claims one attempt at a time,
+recovers an interrupted claim after two minutes, and uses the certificate ID as the email
+provider idempotency key. A confirmed `sent` state never sends again. Failed sends remain on
+the issued certificate for Elevate's bounded Payload job retries. Apply migration `0004` before
+deploying this endpoint.
+
 Apply the numbered migrations in `drizzle/` before enabling the integration in
 an existing environment.

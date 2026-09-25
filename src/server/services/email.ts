@@ -16,6 +16,7 @@ interface SendCertificateEmailOptions {
 	imageBuffer: Buffer;
 	verifyUrl: string;
 	certificateKind?: "workshop" | "course" | "program";
+	idempotencyKey?: string;
 }
 
 export async function sendCertificateEmail(
@@ -39,7 +40,7 @@ export async function sendCertificateEmail(
 				? "course"
 				: "program";
 
-	await getResend().emails.send({
+	const result = await getResend().emails.send({
 		from: process.env.EMAIL_FROM || "certificates@talentease.com",
 		to,
 		subject: `Your Certificate of Completion — ${workshopTitle}`,
@@ -75,5 +76,6 @@ export async function sendCertificateEmail(
 				content: imageBuffer,
 			},
 		],
-	});
+	}, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+	if (result.error) throw new Error(result.error.message);
 }

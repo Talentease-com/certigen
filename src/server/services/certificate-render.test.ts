@@ -43,6 +43,7 @@ const certificate = {
 	email: "person@example.com",
 	legacyFilePath: null,
 	emailStatus: "sent",
+	emailAttemptedAt: null,
 	emailSentAt: null,
 	emailError: null,
 	issuedAt: new Date("2026-07-31T00:00:00Z"),
@@ -115,6 +116,49 @@ describe("immutable certificate rendering", () => {
 
 		expect(loadTemplateVersionById).toHaveBeenCalledWith("version-1");
 		expect(rendered?.pngBuffer).toBe(generated);
+	});
+
+	it("formats an ISO completion timestamp as a UTC calendar date", async () => {
+		const issuedAt = "2026-04-17T11:13:04.529Z";
+		const serviceCertificate = {
+			...certificate,
+			workshopId: null,
+			certificateDate: issuedAt,
+		};
+		vi.mocked(readFile).mockResolvedValue(Buffer.from("background"));
+		vi.mocked(generateCertificateImage).mockResolvedValue({
+			pngBuffer: Buffer.from("generated"),
+		});
+
+		const rendered = await renderCertificate(serviceCertificate, null, version);
+
+		expect(generateCertificateImage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				values: expect.objectContaining({ date: "April 17, 2026" }),
+			}),
+		);
+		expect(rendered?.workshopDate).toBe("April 17, 2026");
+		expect(serviceCertificate.certificateDate).toBe(issuedAt);
+	});
+
+	it("uses the UTC date when an offset timestamp crosses midnight", async () => {
+		vi.mocked(readFile).mockResolvedValue(Buffer.from("background"));
+		vi.mocked(generateCertificateImage).mockResolvedValue({
+			pngBuffer: Buffer.from("generated"),
+		});
+
+		const rendered = await renderCertificate(
+			{ ...certificate, workshopId: null, certificateDate: "2026-04-17T23:30:00-02:00" },
+			null,
+			version,
+		);
+
+		expect(generateCertificateImage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				values: expect.objectContaining({ date: "April 18, 2026" }),
+			}),
+		);
+		expect(rendered?.workshopDate).toBe("April 18, 2026");
 	});
 
 	it("renders dynamic values from the certificate snapshot and pinned revision", async () => {

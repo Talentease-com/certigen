@@ -1,10 +1,9 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, lt, or } from "drizzle-orm";
 import { db } from "#/db";
 import { certificates, templates } from "#/db/schema";
 import { generateCertId } from "#/server/services/certificate-gen";
 import {
 	renderCertificate,
-	type RenderedCertificate,
 } from "#/server/services/certificate-render";
 import { sendCertificateEmail } from "#/server/services/email";
 import {
@@ -35,7 +34,7 @@ export interface ServiceCertificateResult {
 	certId: string;
 	verifyUrl: string;
 	downloadUrl: string;
-	emailStatus: "pending" | "sent" | "failed";
+	emailStatus: "pending" | "sending" | "sent" | "failed";
 }
 
 function baseUrl() {
@@ -61,6 +60,23 @@ function toResponse(
 		downloadUrl: `${origin}/api/certificates/${certId}/file`,
 		emailStatus,
 	};
+}
+
+/** Retrieve an issued artifact without changing its recipient, award, or email state. */
+export async function findServiceCertificate(
+	platform: string,
+	idempotencyKey: string,
+): Promise<ServiceCertificateResult> {
+	const existing = await db.query.certificates.findFirst({
+		where: and(
+			eq(certificates.sourcePlatform, platform),
+			eq(certificates.idempotencyKey, idempotencyKey),
+		),
+	});
+	if (!existing) {
+		throw Object.assign(new Error("Certificate not found"), { status: 404 });
+	}
+	return toResponse(existing.id, existing.emailStatus as ServiceCertificateResult["emailStatus"]);
 }
 
 function assertSamePayload(
@@ -111,16 +127,31 @@ async function loadTemplateByName(name: string) {
 	return { template, version };
 }
 
-/**
- * Emails a rendered certificate and tracks delivery status on the row
- * either way. The image is never persisted — rendered on demand by the
- * caller via renderCertificate.
- */
-async function sendAndTrackEmail(
-	certId: string,
-	rendered: RenderedCertificate,
-): Promise<ServiceCertificateResult["emailStatus"]> {
+/** Delivery is a separate, explicit operation on an already issued artifact. */
+export async function deliverServiceCertificate(
+	platform: string,
+	idempotencyKey: string,
+): Promise<ServiceCertificateResult> {
+	const existing = await db.query.certificates.findFirst({
+		where: and(eq(certificates.sourcePlatform, platform), eq(certificates.idempotencyKey, idempotencyKey)),
+	});
+	if (!existing) throw Object.assign(new Error("Certificate not found"), { status: 404 });
+	if (existing.emailStatus === "sent") return toResponse(existing.id, "sent");
+	// Claim before contacting the provider so concurrent requests cannot send twice.
+	const [claimed] = await db.update(certificates)
+		.set({ emailStatus: "sending", emailAttemptedAt: new Date(), emailError: null })
+		.where(and(eq(certificates.id, existing.id), or(
+			inArray(certificates.emailStatus, ["pending", "failed"]),
+			and(eq(certificates.emailStatus, "sending"),
+				lt(certificates.emailAttemptedAt, new Date(Date.now() - 2 * 60_000))),
+		)))
+		.returning({ id: certificates.id });
+	if (!claimed) return toResponse(existing.id, existing.emailStatus as ServiceCertificateResult["emailStatus"]);
 	try {
+		const pinnedVersion = await loadTemplateVersionById(existing.templateVersionId);
+		if (!pinnedVersion) throw new Error("Certificate template version not found.");
+		const rendered = await renderCertificate(existing, null, pinnedVersion);
+		if (!rendered) throw new Error("Failed to render certificate image.");
 		await sendCertificateEmail({
 			to: rendered.email,
 			participantName: rendered.name,
@@ -129,22 +160,23 @@ async function sendAndTrackEmail(
 			imageBuffer: rendered.pngBuffer,
 			verifyUrl: rendered.verifyUrl,
 			certificateKind: "course",
+			idempotencyKey: `certificate:${existing.id}`,
 		});
 
 		await db
 			.update(certificates)
 			.set({ emailStatus: "sent", emailSentAt: new Date(), emailError: null })
-			.where(eq(certificates.id, certId));
+			.where(eq(certificates.id, existing.id));
 
-		return "sent";
+		return toResponse(existing.id, "sent");
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		await db
 			.update(certificates)
 			.set({ emailStatus: "failed", emailError: message })
-			.where(eq(certificates.id, certId));
+			.where(eq(certificates.id, existing.id));
 
-		return "failed";
+		return toResponse(existing.id, "failed");
 	}
 }
 
@@ -166,22 +198,7 @@ export async function createServiceCertificate(
 	if (existing) {
 		assertSamePayload(existing, input, template.id);
 
-		if (existing.emailStatus === "sent") {
-			return toResponse(existing.id, "sent");
-		}
-
-		const pinnedVersion = await loadTemplateVersionById(
-			existing.templateVersionId,
-		);
-		if (!pinnedVersion) {
-			throw new Error("Certificate template version not found.");
-		}
-		const rendered = await renderCertificate(existing, null, pinnedVersion);
-		if (!rendered) {
-			throw new Error("Failed to render certificate image.");
-		}
-		const status = await sendAndTrackEmail(existing.id, rendered);
-		return toResponse(existing.id, status);
+		return toResponse(existing.id, existing.emailStatus as ServiceCertificateResult["emailStatus"]);
 	}
 
 	const certId = generateCertId();
@@ -203,11 +220,5 @@ export async function createServiceCertificate(
 		})
 		.returning();
 
-	const rendered = await renderCertificate(certRow, null, currentVersion);
-	if (!rendered) {
-		throw new Error("Failed to render certificate image.");
-	}
-
-	const emailStatus = await sendAndTrackEmail(certId, rendered);
-	return toResponse(certId, emailStatus);
+	return toResponse(certRow.id, "pending");
 }
