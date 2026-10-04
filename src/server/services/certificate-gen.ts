@@ -17,6 +17,22 @@ const fontStorage = createStorage({
 	driver: fsDriver({ base: fontsDir }),
 });
 
+/** Font families a certificate design can use, mapped to their file in public/fonts. */
+export const FONT_FILES: Record<string, string> = {
+	Inter: "Inter-Regular.ttf",
+	Roboto: "Roboto-Regular.ttf",
+	"Open Sans": "OpenSans-Regular.ttf",
+	Lato: "Lato-Regular.ttf",
+	Montserrat: "Montserrat-Regular.ttf",
+	"Playfair Display": "PlayfairDisplay-Regular.ttf",
+	Merriweather: "Merriweather-Regular.ttf",
+	"Great Vibes": "GreatVibes-Regular.ttf",
+	"Dancing Script": "DancingScript-Regular.ttf",
+	Parisienne: "Parisienne-Regular.ttf",
+	Satisfy: "Satisfy-Regular.ttf",
+	Caveat: "Caveat-Regular.ttf",
+};
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fontkit ships no types
 const fontCache: Record<string, any> = {};
 
@@ -24,22 +40,7 @@ const fontCache: Record<string, any> = {};
 async function getFont(fontFamily: string): Promise<any | null> {
 	if (fontCache[fontFamily]) return fontCache[fontFamily];
 
-	const fileMap: Record<string, string> = {
-		Inter: "Inter-Regular.ttf",
-		Roboto: "Roboto-Regular.ttf",
-		"Open Sans": "OpenSans-Regular.ttf",
-		Lato: "Lato-Regular.ttf",
-		Montserrat: "Montserrat-Regular.ttf",
-		"Playfair Display": "PlayfairDisplay-Regular.ttf",
-		Merriweather: "Merriweather-Regular.ttf",
-		"Great Vibes": "GreatVibes-Regular.ttf",
-		"Dancing Script": "DancingScript-Regular.ttf",
-		Parisienne: "Parisienne-Regular.ttf",
-		Satisfy: "Satisfy-Regular.ttf",
-		Caveat: "Caveat-Regular.ttf",
-	};
-
-	const fileName = fileMap[fontFamily];
+	const fileName = FONT_FILES[fontFamily];
 	if (!fileName) return null;
 
 	try {
