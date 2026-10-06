@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate-production": "tsx scripts/migrate-production-data.ts",
     "db:compare-migrated": "tsx scripts/compare-migrated-data.ts"
   },

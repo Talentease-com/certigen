@@ -38,6 +38,28 @@ the origin requires registering the new ID.
 pnpm dev
 ```
 
+## Database Migrations
+
+Schema changes live in `drizzle/` as numbered `.sql` files. Every server start
+applies any that have not run yet, in order, before serving requests
+(`src/instrumentation.ts`), so a deploy needs no manual migration step. Applied
+files are recorded in the `certigen_migrations` table, and an advisory lock stops
+two instances from migrating at once. Each file runs in its own transaction; a
+failure rolls that file back, is logged, and leaves later files unapplied.
+
+To run them yourself, for example before starting a new database, use:
+
+```bash
+pnpm db:migrate
+```
+
+Set `CERTIGEN_AUTO_MIGRATE=false` to turn off the automatic step. Builds never
+touch the database. Databases migrated before tracking existed are recognised from
+their schema on the first run, so earlier migrations are recorded, not re-run.
+
+To add a migration, create the next numbered file in `drizzle/` and update
+`src/db/schema.ts` to match.
+
 ## Production Database Migration
 
 The migration commands default to reading `neon_clone` and creating
@@ -102,8 +124,5 @@ Content-Type: application/json
 The endpoint returns the original links and email state. It claims one attempt at a time,
 recovers an interrupted claim after two minutes, and uses the certificate ID as the email
 provider idempotency key. A confirmed `sent` state never sends again. Failed sends remain on
-the issued certificate for Elevate's bounded Payload job retries. Apply migration `0004` before
-deploying this endpoint.
-
-Apply the numbered migrations in `drizzle/` before enabling the integration in
-an existing environment.
+the issued certificate for Elevate's bounded Payload job retries. Migration `0004` backs this
+endpoint and is applied automatically on deploy (see Database Migrations).
