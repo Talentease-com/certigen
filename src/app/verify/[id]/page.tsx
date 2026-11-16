@@ -4,6 +4,25 @@ import { eq } from "drizzle-orm";
 import { db } from "#/db";
 import { certificates, workshops } from "#/db/schema";
 import { Logo } from "#/components/logo";
+import { loadTemplateVersionById } from "#/server/services/template-versions";
+import { CertificateImage } from "./certificate-image";
+
+function baseUrl() {
+	return process.env.BASE_URL || "http://localhost:3000";
+}
+
+function certificateImageUrls(id: string) {
+	const image = `/api/certificates/${encodeURIComponent(id)}/image`;
+	return {
+		full: image,
+		preview: `${image}?size=preview`,
+		download: `/api/certificates/${encodeURIComponent(id)}/file`,
+	};
+}
+
+function certificateImageAlt(cert: { name: string; workshopTitle: string }) {
+	return `Certificate of completion for ${cert.name} — ${cert.workshopTitle}`;
+}
 
 async function getCertificate(id: string) {
 	const cert = await db.query.certificates.findFirst({
@@ -17,6 +36,9 @@ async function getCertificate(id: string) {
 			})
 		: null;
 
+	// Template dimensions let the image reserve its space before it renders.
+	const version = await loadTemplateVersionById(cert.templateVersionId);
+
 	return {
 		id: cert.id,
 		name: cert.name,
@@ -24,6 +46,8 @@ async function getCertificate(id: string) {
 		workshopTitle: cert.certificateTitle ?? workshop?.title ?? "Unknown Certificate",
 		workshopDate: cert.certificateDate ?? workshop?.date ?? "",
 		issuedAt: cert.issuedAt.toISOString(),
+		imageWidth: version?.width,
+		imageHeight: version?.height,
 	};
 }
 
@@ -39,12 +63,26 @@ export async function generateMetadata({
 		return { title: "Certificate Not Found — Certigen" };
 	}
 
+	const shareTitle = `Certificate — ${cert.name}`;
+	const shareDescription = `${cert.name} completed "${cert.workshopTitle}" on ${cert.workshopDate}. Issued by Talentease.`;
+	const image = {
+		url: `${baseUrl()}${certificateImageUrls(cert.id).preview}`,
+		alt: certificateImageAlt(cert),
+	};
+
 	return {
 		title: `Certificate — ${cert.name} | Certigen`,
 		description: `Verified certificate of completion for ${cert.name} — ${cert.workshopTitle}`,
 		openGraph: {
-			title: `Certificate — ${cert.name}`,
-			description: `${cert.name} completed "${cert.workshopTitle}" on ${cert.workshopDate}. Issued by Talentease.`,
+			title: shareTitle,
+			description: shareDescription,
+			images: [image],
+		},
+		twitter: {
+			card: "summary_large_image",
+			title: shareTitle,
+			description: shareDescription,
+			images: [image],
 		},
 	};
 }
@@ -76,6 +114,7 @@ export default async function VerifyPage({
 		);
 	}
 
+	const urls = certificateImageUrls(cert.id);
 	const issuedDate = new Date(cert.issuedAt).toLocaleDateString("en-US", {
 		year: "numeric",
 		month: "long",
@@ -91,7 +130,7 @@ export default async function VerifyPage({
 			</header>
 
 			<main className="flex-1 flex items-center justify-center px-4 pb-20">
-				<div className="w-full max-w-lg animate-fade-in-up">
+				<div className="w-full max-w-4xl animate-fade-in-up">
 					<div className="text-center mb-6">
 						<span className="verified-badge">
 							<svg
@@ -111,13 +150,17 @@ export default async function VerifyPage({
 						</span>
 					</div>
 
-					<div className="glass-card rounded-2xl overflow-hidden">
-						<div className="bg-gradient-to-r from-[#F5A623] to-[#D0021B] px-8 py-6 text-center">
-							<h1 className="text-2xl font-bold text-white mb-1">
-								Certificate of Completion
-							</h1>
-							<p className="text-white/80 text-sm">Talentease</p>
-						</div>
+					<CertificateImage
+						src={urls.preview}
+						fullSizeHref={urls.full}
+						alt={certificateImageAlt(cert)}
+						width={cert.imageWidth}
+						height={cert.imageHeight}
+						downloadHref={urls.download}
+					/>
+
+					<div className="glass-card rounded-2xl overflow-hidden max-w-lg mx-auto">
+						<h1 className="sr-only">Certificate of Completion</h1>
 
 						<div className="p-8 space-y-5">
 							<div className="text-center">

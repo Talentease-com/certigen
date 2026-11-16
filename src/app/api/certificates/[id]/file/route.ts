@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "#/db";
 import { certificates } from "#/db/schema";
+import { certificateFilename } from "#/server/certificate-filename";
 import { renderCertificateById } from "#/server/services/certificate-render";
 
 export const runtime = "nodejs";
@@ -19,13 +20,7 @@ export async function GET(
 				: new Response("Certificate not found", { status: 404 });
 		}
 
-		const safeName = rendered.name
-			.normalize("NFKD")
-			.replace(/[\u0300-\u036f]/g, "")
-			.replace(/[^A-Za-z0-9]+/g, "_")
-			.replace(/^_+|_+$/g, "")
-			.slice(0, 80);
-		const filename = safeName ? `${safeName}_Certificate.png` : "Certificate.png";
+		const filename = certificateFilename(rendered.name);
 		return new Response(new Uint8Array(rendered.pngBuffer), {
 			headers: {
 				"Content-Type": "image/png",
